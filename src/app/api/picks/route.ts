@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { unstable_cache } from 'next/cache';
 import Anthropic from '@anthropic-ai/sdk';
 import { getWorldCupOdds, getGolfOdds, getBestLine, formatAmericanOdds, normalizeOutcomeName } from '@/lib/odds';
 import { getWorldCupStandings, getTeamRecentForm, summarizeRecentForm } from '@/lib/soccer';
@@ -8,9 +9,11 @@ import { PicksResponse } from '@/lib/types';
 
 // Cache the generated picks for 20 minutes — repeated Refresh presses or page
 // reloads within this window reuse the cached result instead of paying for a
-// new Anthropic call each time. In-memory so it also works in `next dev`.
-const CACHE_TTL_MS = 20 * 60 * 1000;
-let cache: { data: PicksResponse; expiresAt: number } | null = null;
+// new Anthropic call each time. Uses Next's persistent Data Cache (not a
+// plain in-memory variable) because Vercel can route requests to different
+// serverless instances — an in-memory cache would reset on every cold start
+// and silently fail to prevent repeat billed calls.
+const CACHE_TTL_SECONDS = 20 * 60;
 
 interface StandingsRow {
   team: { id: number; name: string; shortName?: string };
@@ -101,11 +104,7 @@ function buildMockWorldCup(data: { homeTeam: string; awayTeam: string; kickoff: 
   });
 }
 
-export async function GET() {
-  if (cache && cache.expiresAt > Date.now()) {
-    return NextResponse.json(cache.data);
-  }
-
+async function generatePicks(): Promise<PicksResponse> {
   const errors: string[] = [];
 
   // Fetch all data in parallel
@@ -196,21 +195,17 @@ export async function GET() {
   const hasWCData = wcData.length > 0;
   const hasGolfData = golfData !== null;
 
-  if (!hasWCData && !hasGolfData) {
-    if (!process.env.ANTHROPIC_API_KEY) {
-      return NextResponse.json({ worldcup: [], golf: [], generatedAt: new Date().toISOString(), errors: ['API keys not configured yet. See HANDOFF.md for setup instructions.'] });
-    }
+  if (!hasWCData && !hasGolfData && !process.env.ANTHROPIC_API_KEY) {
+    return { worldcup: [], golf: [], generatedAt: new Date().toISOString(), errors: ['API keys not configured yet. See HANDOFF.md for setup instructions.'] };
   }
 
   if (MOCK_PICKS) {
-    const mockResponse: PicksResponse = {
+    return {
       worldcup: buildMockWorldCup(wcData),
       golf: [],
       generatedAt: new Date().toISOString(),
       errors,
     };
-    cache = { data: mockResponse, expiresAt: Date.now() + CACHE_TTL_MS };
-    return NextResponse.json(mockResponse);
   }
 
   // Build AI prompt
@@ -291,33 +286,48 @@ Rules:
 - If no upcoming World Cup matches are listed, return an empty array
 - Always return valid JSON only, no other text`;
 
+  const message = await client.messages.create({
+    model: 'claude-sonnet-5',
+    max_tokens: 3000,
+    messages: [{ role: 'user', content: prompt }],
+  });
+
+  // Sonnet 5 uses adaptive thinking by default, so the text block isn't
+  // necessarily content[0] — a thinking block can come first.
+  const textBlock = message.content.find((block) => block.type === 'text');
+  const text = textBlock && textBlock.type === 'text' ? textBlock.text : '';
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error('No JSON in AI response');
+
+  const picks = JSON.parse(sanitizeJsonText(jsonMatch[0]));
+
+  return {
+    worldcup: picks.worldcup ?? [],
+    golf: picks.golf ?? [],
+    generatedAt: new Date().toISOString(),
+    errors,
+  };
+}
+
+// Wrapped in Next's persistent Data Cache (not a plain in-memory variable —
+// see comment above) so the 20-minute TTL actually holds across requests
+// hitting different serverless instances. If generatePicks() throws, the
+// failed result is not cached, so the next request retries against the AI
+// instead of getting stuck on a cached error.
+const getCachedPicks = unstable_cache(generatePicks, ['sports-picks-ai-picks'], {
+  revalidate: CACHE_TTL_SECONDS,
+});
+
+export async function GET() {
   try {
-    const message = await client.messages.create({
-      model: 'claude-sonnet-5',
-      max_tokens: 3000,
-      messages: [{ role: 'user', content: prompt }],
-    });
-
-    // Sonnet 5 uses adaptive thinking by default, so the text block isn't
-    // necessarily content[0] — a thinking block can come first.
-    const textBlock = message.content.find((block) => block.type === 'text');
-    const text = textBlock && textBlock.type === 'text' ? textBlock.text : '';
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error('No JSON in AI response');
-
-    const picks = JSON.parse(sanitizeJsonText(jsonMatch[0]));
-
-    const response: PicksResponse = {
-      worldcup: picks.worldcup ?? [],
-      golf: picks.golf ?? [],
-      generatedAt: new Date().toISOString(),
-      errors,
-    };
-
-    cache = { data: response, expiresAt: Date.now() + CACHE_TTL_MS };
+    const response = await getCachedPicks();
     return NextResponse.json(response);
   } catch (err) {
-    errors.push(`AI analysis failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
-    return NextResponse.json({ worldcup: [], golf: [], generatedAt: new Date().toISOString(), errors });
+    return NextResponse.json({
+      worldcup: [],
+      golf: [],
+      generatedAt: new Date().toISOString(),
+      errors: [`AI analysis failed: ${err instanceof Error ? err.message : 'Unknown error'}`],
+    });
   }
 }
