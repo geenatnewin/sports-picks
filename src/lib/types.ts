@@ -9,8 +9,22 @@ export interface Pick {
   matchTime?: string;
 }
 
+export interface PickOption {
+  pick: string;
+  betType: string;
+  odds: string;
+  confidence: 'High' | 'Medium' | 'Low';
+  explanation: string;
+}
+
+export interface MatchPick {
+  event: string;
+  matchTime?: string;
+  highestPercent: PickOption;
+}
+
 export interface PicksResponse {
-  worldcup: Pick[];
+  worldcup: MatchPick[];
   golf: Pick[];
   generatedAt: string;
   errors: string[];

@@ -3,15 +3,25 @@ import { OddsGame } from './types';
 const BASE = 'https://api.the-odds-api.com/v4';
 const KEY = process.env.ODDS_API_KEY;
 
+// Only show matches happening today through this many days ahead.
+const MAX_DAYS_AHEAD = 1;
+
 export async function getWorldCupOdds(): Promise<OddsGame[]> {
   if (!KEY) return [];
   try {
     const res = await fetch(
-      `${BASE}/sports/soccer_fifa_world_cup/odds?apiKey=${KEY}&regions=us&markets=h2h,spreads&oddsFormat=american`,
+      `${BASE}/sports/soccer_fifa_world_cup/odds?apiKey=${KEY}&regions=us&markets=h2h,spreads,totals&oddsFormat=american`,
       { next: { revalidate: 1800 } }
     );
     if (!res.ok) return [];
-    return res.json();
+    const games: OddsGame[] = await res.json();
+
+    const now = new Date();
+    const cutoff = new Date(now.getFullYear(), now.getMonth(), now.getDate() + MAX_DAYS_AHEAD, 23, 59, 59, 999);
+    return games.filter((g) => {
+      const kickoff = new Date(g.commence_time);
+      return kickoff >= now && kickoff <= cutoff;
+    });
   } catch {
     return [];
   }

@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "HarpPICKS",
+  title: "SHARPERPICKS",
   description: "AI-assisted sports picks — World Cup and Golf",
 };
 

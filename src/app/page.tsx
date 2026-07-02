@@ -1,44 +1,50 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import PickCard from '@/components/PickCard';
+import MarketsBrowser from '@/components/MarketsBrowser';
+import ParlaySlip from '@/components/ParlaySlip';
+import MyPicksPanel from '@/components/MyPicksPanel';
 import { PicksResponse } from '@/lib/types';
+import { ParlayLeg, PlacedSlip } from '@/lib/parlay';
 
-function SectionHeader({ emoji, title, count }: { emoji: string; title: string; count: number }) {
-  return (
-    <div className="flex items-center gap-3 mb-4 pb-3 border-b border-white/[0.06]">
-      <span className="text-xl opacity-70">{emoji}</span>
-      <div>
-        <h2 className="text-white/90 font-semibold text-base tracking-tight">{title}</h2>
-        <p className="text-neutral-600 text-xs">{count} pick{count !== 1 ? 's' : ''} today</p>
-      </div>
-    </div>
-  );
-}
+const SLIPS_STORAGE_KEY = 'harppicks-my-slips';
 
-function Skeleton() {
+function SectionHeader({
+  emoji,
+  title,
+  count,
+  open,
+  onToggle,
+}: {
+  emoji: string;
+  title: string;
+  count: number;
+  open: boolean;
+  onToggle: () => void;
+}) {
   return (
-    <div className="space-y-4">
-      {[1, 2, 3].map((i) => (
-        <div key={i} className="bg-white/[0.02] border border-white/[0.06] rounded-lg p-5 animate-pulse">
-          <div className="flex justify-between mb-3">
-            <div className="space-y-2">
-              <div className="h-2 w-16 bg-white/10 rounded" />
-              <div className="h-4 w-40 bg-white/10 rounded" />
-            </div>
-            <div className="h-6 w-16 bg-white/10 rounded-full" />
-          </div>
-          <div className="flex gap-3 mb-4">
-            <div className="h-14 flex-1 bg-white/10 rounded-lg" />
-            <div className="h-14 w-20 bg-white/10 rounded-lg" />
-          </div>
-          <div className="space-y-1.5">
-            <div className="h-3 bg-white/10 rounded w-full" />
-            <div className="h-3 bg-white/10 rounded w-4/5" />
-          </div>
+    <button
+      onClick={onToggle}
+      className={`w-full relative flex flex-col items-center text-center gap-3 mb-4 pb-3 border-b border-white/[0.06] ${
+        open ? 'sticky top-36 z-10 bg-[#191715]/95 backdrop-blur shadow-[0_8px_20px_-10px_rgba(0,0,0,0.6)]' : ''
+      }`}
+    >
+      <div className="flex items-center gap-3">
+        <span className="text-xl opacity-70">{emoji}</span>
+        <div>
+          <h2 className="text-white/90 font-semibold text-base tracking-tight">{title}</h2>
+          <p className="text-neutral-600 text-xs">{count} upcoming pick{count !== 1 ? 's' : ''}</p>
         </div>
-      ))}
-    </div>
+      </div>
+      <svg
+        className={`absolute right-0 top-1 w-4 h-4 text-neutral-500 transition-transform flex-shrink-0 ${open ? 'rotate-180' : ''}`}
+        fill="none"
+        viewBox="0 0 24 24"
+        stroke="currentColor"
+      >
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+      </svg>
+    </button>
   );
 }
 
@@ -47,6 +53,64 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string>('');
+  const [legs, setLegs] = useState<ParlayLeg[]>([]);
+  const [wcOpen, setWcOpen] = useState(false);
+  const [wcTab, setWcTab] = useState<'gameProps' | 'playerProps' | null>(null);
+  const [placedSlips, setPlacedSlips] = useState<PlacedSlip[]>([]);
+
+  // Load saved slips from this browser once on mount
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(SLIPS_STORAGE_KEY);
+      if (saved) setPlacedSlips(JSON.parse(saved));
+    } catch {
+      // ignore corrupted storage
+    }
+  }, []);
+
+  const toggleLeg = useCallback((leg: ParlayLeg) => {
+    setLegs((prev) => {
+      const exists = prev.find((l) => l.id === leg.id);
+      if (exists) return prev.filter((l) => l.id !== leg.id);
+      return [...prev, leg];
+    });
+  }, []);
+
+  const removeLeg = useCallback((id: string) => {
+    setLegs((prev) => prev.filter((l) => l.id !== id));
+  }, []);
+
+  const clearLegs = useCallback(() => setLegs([]), []);
+
+  const placeBet = useCallback(
+    (stake: number, combinedAmerican: number, payout: number) => {
+      setPlacedSlips((prev) => {
+        const next = [
+          {
+            id: `${Date.now()}`,
+            legs,
+            stake,
+            combinedAmerican,
+            payout,
+            placedAt: new Date().toISOString(),
+          },
+          ...prev,
+        ];
+        localStorage.setItem(SLIPS_STORAGE_KEY, JSON.stringify(next));
+        return next;
+      });
+      setLegs([]);
+    },
+    [legs]
+  );
+
+  const removeSlip = useCallback((id: string) => {
+    setPlacedSlips((prev) => {
+      const next = prev.filter((s) => s.id !== id);
+      localStorage.setItem(SLIPS_STORAGE_KEY, JSON.stringify(next));
+      return next;
+    });
+  }, []);
 
   const fetchPicks = useCallback(async () => {
     setLoading(true);
@@ -72,17 +136,21 @@ export default function Home() {
     weekday: 'long', month: 'long', day: 'numeric', year: 'numeric',
   });
 
-  const hasNoData = data && data.worldcup.length === 0 && data.golf.length === 0;
+  const hasNoData = data && data.worldcup.length === 0;
+  const aiFailed = data?.errors?.some((e) => e.includes('AI analysis failed')) ?? false;
 
   return (
-    <div className="min-h-screen bg-neutral-950 text-neutral-100">
+    <div className="min-h-screen bg-[#191715] text-neutral-100">
       {/* Header */}
-      <header className="border-b border-white/[0.06] bg-neutral-950/80 backdrop-blur sticky top-0 z-10">
+      <header className="border-b border-white/[0.06] bg-[#191715]/80 backdrop-blur sticky top-0 z-10 shadow-[0_8px_24px_-8px_rgba(0,0,0,0.55)]">
         <div className="max-w-2xl mx-auto px-4 py-8 relative flex flex-col items-center text-center">
           <h1 className="text-4xl sm:text-5xl font-bold tracking-tight">
-            <span className="brand-word">HarpPICKS</span>
+            <span className="brand-word">SHARPERPICKS</span>
           </h1>
-          <p className="text-neutral-600 text-xs mt-2">{today}</p>
+          <p className="text-neutral-600 text-xs mt-5">
+            {today}
+            {lastUpdated && !loading && <> · Last updated {lastUpdated}</>}
+          </p>
           <button
             onClick={fetchPicks}
             disabled={loading}
@@ -96,15 +164,10 @@ export default function Home() {
         </div>
       </header>
 
-      <main className="max-w-2xl mx-auto px-4 py-6 space-y-8">
+      <main className={`max-w-2xl mx-auto px-4 py-6 space-y-8 ${legs.length > 0 ? 'pb-24' : ''}`}>
         {/* Status bar */}
-        {lastUpdated && !loading && (
-          <p className="text-neutral-600 text-xs text-center">
-            Last updated {lastUpdated}
-            {data?.errors && data.errors.length > 0 && (
-              <span className="text-amber-600"> · Some data sources unavailable</span>
-            )}
-          </p>
+        {lastUpdated && !loading && data?.errors && data.errors.length > 0 && (
+          <p className="text-amber-600 text-xs text-center">Some data sources unavailable</p>
         )}
 
         {error && (
@@ -128,40 +191,59 @@ export default function Home() {
             emoji="⚽"
             title="World Cup 2026"
             count={loading ? 0 : (data?.worldcup.length ?? 0)}
+            open={wcOpen}
+            onToggle={() => setWcOpen((o) => !o)}
           />
-          {loading ? (
-            <Skeleton />
-          ) : data && data.worldcup.length > 0 ? (
-            <div className="space-y-4">
-              {data.worldcup.map((pick, i) => (
-                <PickCard key={i} pick={pick} />
-              ))}
-            </div>
-          ) : !loading && (
-            <div className="bg-white/[0.02] border border-white/[0.06] rounded-lg p-6 text-center">
-              <p className="text-neutral-500 text-sm">No World Cup matches today</p>
-            </div>
-          )}
-        </section>
+          {wcOpen && (
+            <div className="space-y-6">
+              {/* Tabs */}
+              <div className="flex justify-center gap-2">
+                <button
+                  onClick={() => setWcTab('gameProps')}
+                  className={`chip-elevated text-sm px-4 py-2 rounded-lg ${
+                    wcTab === 'gameProps' ? 'chip-selected text-red-300' : 'text-neutral-300'
+                  }`}
+                >
+                  Game Props
+                </button>
+                <button
+                  onClick={() => setWcTab('playerProps')}
+                  className={`chip-elevated text-sm px-4 py-2 rounded-lg ${
+                    wcTab === 'playerProps' ? 'chip-selected text-red-300' : 'text-neutral-300'
+                  }`}
+                >
+                  Player Props
+                </button>
+              </div>
 
-        {/* Golf Section */}
-        <section>
-          <SectionHeader
-            emoji="⛳"
-            title="Golf"
-            count={loading ? 0 : (data?.golf.length ?? 0)}
-          />
-          {loading ? (
-            <Skeleton />
-          ) : data && data.golf.length > 0 ? (
-            <div className="space-y-4">
-              {data.golf.map((pick, i) => (
-                <PickCard key={i} pick={pick} />
-              ))}
-            </div>
-          ) : !loading && (
-            <div className="bg-white/[0.02] border border-white/[0.06] rounded-lg p-6 text-center">
-              <p className="text-neutral-500 text-sm">No active golf tournament this week</p>
+              {wcTab === 'gameProps' && (
+                <div>
+                  <p className="text-neutral-600 text-xs uppercase tracking-widest mb-3 text-center">
+                    Tap any line to add it to your parlay
+                  </p>
+                  {aiFailed && (
+                    <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-4 text-center mb-4">
+                      <p className="text-amber-400 text-sm font-medium mb-1">Odds are live, but pick generation failed</p>
+                      <p className="text-neutral-500 text-xs">
+                        Check that <code className="text-amber-300">ANTHROPIC_API_KEY</code> in .env.local is a real key, not the placeholder.
+                      </p>
+                    </div>
+                  )}
+                  <MarketsBrowser
+                    legs={legs}
+                    onToggle={toggleLeg}
+                    picks={data?.worldcup ?? []}
+                    picksLoading={loading}
+                    aiFailed={aiFailed}
+                  />
+                </div>
+              )}
+
+              {wcTab === 'playerProps' && (
+                <div className="card-elevated rounded-lg p-6 text-center">
+                  <p className="text-neutral-500 text-sm">Player props coming soon</p>
+                </div>
+              )}
             </div>
           )}
         </section>
@@ -170,6 +252,9 @@ export default function Home() {
           For entertainment only. Please bet responsibly.
         </footer>
       </main>
+
+      <ParlaySlip legs={legs} onRemove={removeLeg} onClear={clearLegs} onPlace={placeBet} />
+      <MyPicksPanel slips={placedSlips} onRemoveSlip={removeSlip} />
     </div>
   );
 }

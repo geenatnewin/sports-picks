@@ -1,13 +1,13 @@
 @import "tailwindcss";
 
 :root {
-  --background: #161514;
+  --background: #191715;
   --foreground: #ecebe8;
   --accent: #ef4444;
 }
 
 body {
-  background: var(--background);
+  background: radial-gradient(ellipse 120% 60% at 50% 0%, #221f1c 0%, var(--background) 55%);
   color: var(--foreground);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -19,6 +19,87 @@ body {
 
 :focus-visible {
   outline-color: var(--accent);
+}
+
+/* ── DEPTH / 3D ── */
+.card-elevated {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.045) 0%, rgba(255, 255, 255, 0.015) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.05),
+    0 10px 24px -10px rgba(0, 0, 0, 0.65),
+    0 3px 8px -3px rgba(0, 0, 0, 0.5);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+a.card-elevated:hover,
+button.card-elevated:hover,
+.card-elevated.card-hoverable:hover {
+  transform: translateY(-3px);
+  border-color: rgba(239, 68, 68, 0.3);
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.07),
+    0 18px 32px -12px rgba(0, 0, 0, 0.7),
+    0 6px 14px -4px rgba(0, 0, 0, 0.55);
+}
+
+.chip-elevated {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.02) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.06),
+    0 4px 10px -4px rgba(0, 0, 0, 0.6);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.chip-elevated:hover {
+  transform: translateY(-1px);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+.chip-elevated.chip-selected {
+  background: linear-gradient(180deg, rgba(239, 68, 68, 0.22) 0%, rgba(239, 68, 68, 0.1) 100%);
+  border-color: rgba(239, 68, 68, 0.45);
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.08),
+    0 4px 12px -3px rgba(239, 68, 68, 0.25);
+}
+
+.btn-raised {
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.15),
+    0 3px 0 0 rgba(0, 0, 0, 0.35),
+    0 8px 16px -6px rgba(0, 0, 0, 0.6);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+.btn-raised:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.18),
+    0 4px 0 0 rgba(0, 0, 0, 0.35),
+    0 12px 22px -8px rgba(0, 0, 0, 0.65);
+}
+.btn-raised:active {
+  transform: translateY(2px);
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.1),
+    0 1px 0 0 rgba(0, 0, 0, 0.35),
+    0 3px 8px -3px rgba(0, 0, 0, 0.5);
+}
+
+.panel-elevated-top {
+  box-shadow: 0 -14px 34px -10px rgba(0, 0, 0, 0.65), 0 -3px 10px -3px rgba(0, 0, 0, 0.5);
+}
+.panel-elevated-left {
+  box-shadow: -14px 0 34px -10px rgba(0, 0, 0, 0.65), -3px 0 10px -3px rgba(0, 0, 0, 0.5);
+}
+
+/* Solid, fully opaque card for modals/popups — unlike .card-elevated, this must
+   never let content behind it show through. */
+.modal-card {
+  background: #211e1b;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.05),
+    0 24px 48px -12px rgba(0, 0, 0, 0.75),
+    0 8px 20px -6px rgba(0, 0, 0, 0.6);
 }
 
 .brand-word {
