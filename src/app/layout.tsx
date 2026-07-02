@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "SHARPERPICKS",
+  title: "Dylan Harper's \"Trust Me\" Locks",
   description: "AI-assisted sports picks — World Cup and Golf",
 };
 

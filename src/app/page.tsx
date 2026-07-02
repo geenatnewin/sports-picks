@@ -144,8 +144,8 @@ export default function Home() {
       {/* Header */}
       <header className="border-b border-white/[0.06] bg-[#191715]/80 backdrop-blur sticky top-0 z-10 shadow-[0_8px_24px_-8px_rgba(0,0,0,0.55)]">
         <div className="max-w-2xl mx-auto px-4 py-8 relative flex flex-col items-center text-center">
-          <h1 className="text-4xl sm:text-5xl font-bold tracking-tight">
-            <span className="brand-word">SHARPERPICKS</span>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight px-8">
+            <span className="brand-word">Dylan Harper&apos;s &quot;Trust Me&quot; Locks</span>
           </h1>
           <p className="text-neutral-600 text-xs mt-5">
             {today}
