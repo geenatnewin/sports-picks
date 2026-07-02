@@ -45,10 +45,10 @@ function FormRow({ teamName, form }: { teamName: string; form: FormResult[] | nu
   if (!form || form.length === 0) return null;
   return (
     <div>
-      <p className="text-neutral-600 text-[11px] uppercase tracking-widest mb-1.5">{teamName} — L5</p>
-      <div className="flex flex-wrap gap-1.5">
+      <p className="text-neutral-600 text-xs uppercase tracking-widest mb-2">{teamName} — L5</p>
+      <div className="flex flex-wrap gap-2">
         {form.map((r, i) => (
-          <span key={i} className={`text-[11px] px-1.5 py-0.5 rounded border whitespace-nowrap ${formResultStyles[r.result]}`}>
+          <span key={i} className={`text-xs px-2 py-1 rounded border whitespace-nowrap ${formResultStyles[r.result]}`}>
             {r.result} {r.goalsFor ?? '?'}-{r.goalsAgainst ?? '?'} vs {r.opponent}
           </span>
         ))}
@@ -83,21 +83,21 @@ function ConfidenceBadge({ confidence }: { confidence: 'High' | 'Medium' | 'Low'
 function AiPickSummary({ pick, onClick }: { pick: MatchPick; onClick: () => void }) {
   const option = pick.highestPercent;
   return (
-    <button onClick={onClick} className="chip-elevated rounded-lg p-4 w-full text-left">
-      <div className="flex items-center justify-between mb-2.5">
+    <button onClick={onClick} className="chip-elevated rounded-lg p-5 w-full text-left">
+      <div className="flex items-center justify-between mb-3">
         <p className="text-neutral-500 text-xs uppercase tracking-widest">Highest % to Hit</p>
         <ConfidenceBadge confidence={option.confidence} />
       </div>
       <div className="flex items-center justify-between gap-3">
         <div>
-          <p className="text-white/90 font-bold text-base leading-tight">{option.pick}</p>
+          <p className="text-white/90 font-bold text-lg leading-tight">{option.pick}</p>
           <p className="text-neutral-600 text-xs mt-0.5">{option.betType}</p>
         </div>
-        <p className={`font-bold text-base whitespace-nowrap ${option.odds.startsWith('+') ? 'text-red-400' : 'text-white/90'}`}>
+        <p className={`font-bold text-lg whitespace-nowrap ${option.odds.startsWith('+') ? 'text-red-400' : 'text-white/90'}`}>
           {option.odds}
         </p>
       </div>
-      <p className="text-neutral-600 text-[11px] mt-2.5 text-center">Tap for full analysis</p>
+      <p className="text-neutral-600 text-xs mt-3 text-center">Tap for full analysis</p>
     </button>
   );
 }
@@ -185,26 +185,26 @@ export default function MarketsBrowser({
 
   return (
     <>
-      <div className="space-y-4">
+      <div className="space-y-5">
         {matches.map((match) => {
           const pick = pickByEvent.get(match.event);
           return (
-            <div key={match.gameId} className="card-elevated rounded-lg p-4">
-              <p className="text-white/90 font-semibold text-sm">{match.event}</p>
-              <p className="text-neutral-600 text-xs mb-3">{match.matchTime}</p>
+            <div key={match.gameId} className="card-elevated rounded-xl p-6">
+              <p className="text-white/90 font-semibold text-base">{match.event}</p>
+              <p className="text-neutral-600 text-sm mb-4">{match.matchTime}</p>
 
               {(match.homeForm || match.awayForm) && (
-                <div className="space-y-2.5 mb-4 pb-4 border-b border-white/[0.06]">
+                <div className="space-y-3 mb-5 pb-5 border-b border-white/[0.06]">
                   <FormRow teamName={match.homeTeam} form={match.homeForm} />
                   <FormRow teamName={match.awayTeam} form={match.awayForm} />
                 </div>
               )}
 
-              <div className="space-y-3 mb-4">
+              <div className="space-y-4 mb-5">
                 {match.markets.map((market) => (
                   <div key={market.key}>
-                    <p className="text-neutral-500 text-xs uppercase tracking-widest mb-1.5">{market.label}</p>
-                    <div className="flex flex-wrap gap-2">
+                    <p className="text-neutral-500 text-xs uppercase tracking-widest mb-2">{market.label}</p>
+                    <div className="flex flex-wrap gap-2.5">
                       {market.outcomes.map((outcome) => {
                         const selected = isSelected(outcome.id);
                         return (
@@ -219,7 +219,7 @@ export default function MarketsBrowser({
                                 odds: outcome.oddsValue,
                               })
                             }
-                            className={`chip-elevated text-xs px-3 py-1.5 rounded-lg ${
+                            className={`chip-elevated text-sm px-4 py-2 rounded-lg ${
                               selected ? 'chip-selected text-red-300' : 'text-neutral-300'
                             }`}
                           >
