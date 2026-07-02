@@ -41,6 +41,12 @@ const formResultStyles = {
   L: 'bg-white/[0.05] text-neutral-500 border-white/10',
 };
 
+const formResultLabels = {
+  W: 'W',
+  D: 'T',
+  L: 'L',
+};
+
 function FormRow({ teamName, form }: { teamName: string; form: FormResult[] | null }) {
   if (!form || form.length === 0) return null;
   return (
@@ -49,7 +55,7 @@ function FormRow({ teamName, form }: { teamName: string; form: FormResult[] | nu
       <div className="flex flex-wrap gap-2">
         {form.map((r, i) => (
           <span key={i} className={`text-xs px-2 py-1 rounded border whitespace-nowrap ${formResultStyles[r.result]}`}>
-            {r.result} {r.goalsFor ?? '?'}-{r.goalsAgainst ?? '?'} vs {r.opponent}
+            {formResultLabels[r.result]} {r.goalsFor ?? '?'}-{r.goalsAgainst ?? '?'} vs {r.opponent}
           </span>
         ))}
       </div>
