@@ -17,11 +17,44 @@ interface OddsMarket {
   outcomes: OddsOutcome[];
 }
 
+interface FormResult {
+  result: 'W' | 'D' | 'L';
+  goalsFor: number | null;
+  goalsAgainst: number | null;
+  opponent: string;
+}
+
 interface OddsMatch {
   gameId: string;
   event: string;
+  homeTeam: string;
+  awayTeam: string;
+  homeForm: FormResult[] | null;
+  awayForm: FormResult[] | null;
   matchTime: string;
   markets: OddsMarket[];
+}
+
+const formResultStyles = {
+  W: 'bg-red-500/15 text-red-300 border-red-500/30',
+  D: 'bg-yellow-500/15 text-yellow-300 border-yellow-500/30',
+  L: 'bg-white/[0.05] text-neutral-500 border-white/10',
+};
+
+function FormRow({ teamName, form }: { teamName: string; form: FormResult[] | null }) {
+  if (!form || form.length === 0) return null;
+  return (
+    <div>
+      <p className="text-neutral-600 text-[11px] uppercase tracking-widest mb-1.5">{teamName} — Last {form.length}</p>
+      <div className="flex flex-wrap gap-1.5">
+        {form.map((r, i) => (
+          <span key={i} className={`text-[11px] px-1.5 py-0.5 rounded border whitespace-nowrap ${formResultStyles[r.result]}`}>
+            {r.result} {r.goalsFor ?? '?'}-{r.goalsAgainst ?? '?'} vs {r.opponent}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 const confidenceStyles = {
@@ -159,6 +192,13 @@ export default function MarketsBrowser({
             <div key={match.gameId} className="card-elevated rounded-lg p-4">
               <p className="text-white/90 font-semibold text-sm">{match.event}</p>
               <p className="text-neutral-600 text-xs mb-3">{match.matchTime}</p>
+
+              {(match.homeForm || match.awayForm) && (
+                <div className="space-y-2.5 mb-4 pb-4 border-b border-white/[0.06]">
+                  <FormRow teamName={match.homeTeam} form={match.homeForm} />
+                  <FormRow teamName={match.awayTeam} form={match.awayForm} />
+                </div>
+              )}
 
               <div className="space-y-3 mb-4">
                 {match.markets.map((market) => (
