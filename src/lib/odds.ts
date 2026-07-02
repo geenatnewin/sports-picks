@@ -3,12 +3,9 @@ import { OddsGame } from './types';
 const BASE = 'https://api.the-odds-api.com/v4';
 const KEY = process.env.ODDS_API_KEY;
 
-// Only show matches happening today through this many days ahead.
-const MAX_DAYS_AHEAD = 1;
-
-// "Today"/"tomorrow" are always anchored to US Eastern time, regardless of
-// what timezone the server process itself runs in (Vercel runs UTC, which
-// can already be a calendar day ahead of Eastern near the day boundary).
+// "Today" is always anchored to US Eastern time, regardless of what
+// timezone the server process itself runs in (Vercel runs UTC, which can
+// already be a calendar day ahead of Eastern near the day boundary).
 function nyDateKey(date: Date): string {
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: 'America/New_York',
@@ -30,14 +27,17 @@ export async function getWorldCupOdds(): Promise<OddsGame[]> {
 
     const now = new Date();
     const todayKey = nyDateKey(now);
-    const cutoffKey = nyDateKey(new Date(now.getTime() + MAX_DAYS_AHEAD * 24 * 60 * 60 * 1000));
 
-    return games.filter((g) => {
-      const kickoff = new Date(g.commence_time);
-      if (kickoff < now) return false;
-      const kickoffKey = nyDateKey(kickoff);
-      return kickoffKey >= todayKey && kickoffKey <= cutoffKey;
-    });
+    // Only games that haven't started yet, earliest first
+    const upcoming = games
+      .filter((g) => new Date(g.commence_time) >= now)
+      .sort((a, b) => new Date(a.commence_time).getTime() - new Date(b.commence_time).getTime());
+
+    const todaysGames = upcoming.filter((g) => nyDateKey(new Date(g.commence_time)) === todayKey);
+    if (todaysGames.length > 0) return todaysGames;
+
+    // No games today — show just the single next upcoming game, nothing further out.
+    return upcoming.length > 0 ? [upcoming[0]] : [];
   } catch {
     return [];
   }
