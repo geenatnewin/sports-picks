@@ -3,6 +3,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { getWorldCupOdds, getGolfOdds, getBestLine, formatAmericanOdds } from '@/lib/odds';
 import { getWorldCupStandings } from '@/lib/soccer';
 import { getTournamentPredictions, getGolfRankings } from '@/lib/golf';
+import { getPredictionMarkets } from '@/lib/predictionMarkets';
 import { PicksResponse } from '@/lib/types';
 
 // Cache the generated picks for 20 minutes — repeated Refresh presses or page
@@ -41,7 +42,7 @@ const INCLUDE_GOLF = false;
 // Set to false once a real ANTHROPIC_API_KEY is active.
 const MOCK_PICKS = true;
 
-function buildMockWorldCup(data: { homeTeam: string; awayTeam: string; kickoff: string; mlRaw: { name: string; price: number }[] }[]) {
+function buildMockWorldCup(data: { homeTeam: string; awayTeam: string; kickoff: string; mlRaw: { name: string; price: number }[]; polymarket: string | null; kalshi: string | null }[]) {
   return data.map((g) => {
     const sorted = [...g.mlRaw].sort((a, b) => a.price - b.price); // most negative (favorite) first
     const favorite = sorted[0];
@@ -54,7 +55,7 @@ function buildMockWorldCup(data: { homeTeam: string; awayTeam: string; kickoff: 
         betType: 'Moneyline',
         odds: favorite ? formatAmericanOdds(favorite.price) : 'N/A',
         confidence: 'High' as const,
-        explanation: `[Preview] Placeholder pick using real odds — not real analysis yet. Add a real ANTHROPIC_API_KEY to get actual reasoning here.`,
+        explanation: `[Preview] Placeholder pick using real odds — not real analysis yet. Add a real ANTHROPIC_API_KEY to get actual reasoning here.\n\n• Polymarket (live, free — no credits used): ${g.polymarket ?? 'no match found'}\n• Kalshi (live, free — no credits used): ${g.kalshi ?? 'no match found'}`,
       },
     };
   });
@@ -82,35 +83,47 @@ export async function GET() {
   );
 
   // Format World Cup data for AI — includes today's matches plus upcoming ones
-  const wcData = wcOdds.slice(0, 6).map((game) => {
-    const ml = getBestLine(game, 'h2h');
-    const spread = getBestLine(game, 'spreads');
-    const totals = getBestLine(game, 'totals');
-    return {
-      homeTeam: game.home_team,
-      awayTeam: game.away_team,
-      kickoff: new Date(game.commence_time).toLocaleString('en-US', {
-        timeZone: 'America/New_York',
-        weekday: 'short',
-        month: 'short',
-        day: 'numeric',
-        hour: 'numeric',
-        minute: '2-digit',
-      }),
-      mlRaw: ml ?? [],
-      moneyline: ml
-        ? ml.map((o) => `${o.name}: ${formatAmericanOdds(o.price)}`).join(' | ')
-        : 'Not available',
-      spread: spread
-        ? spread.map((o) => `${o.name} ${o.point && o.point > 0 ? '+' : ''}${o.point ?? ''}: ${formatAmericanOdds(o.price)}`).join(' | ')
-        : 'Not available',
-      totals: totals
-        ? totals.map((o) => `${o.name} ${o.point ?? ''}: ${formatAmericanOdds(o.price)}`).join(' | ')
-        : 'Not available',
-      homeStats: findTeamStats(standingsRows, game.home_team) ?? 'No group-stage record yet',
-      awayStats: findTeamStats(standingsRows, game.away_team) ?? 'No group-stage record yet',
-    };
-  });
+  const wcData = await Promise.all(
+    wcOdds.slice(0, 6).map(async (game) => {
+      const ml = getBestLine(game, 'h2h');
+      const spread = getBestLine(game, 'spreads');
+      const totals = getBestLine(game, 'totals');
+      const markets = await getPredictionMarkets(game.home_team, game.away_team).catch(() => ({
+        polymarket: null,
+        kalshi: null,
+      }));
+
+      const formatMarket = (outcomes: { label: string; probability: number }[] | null) =>
+        outcomes ? outcomes.map((o) => `${o.label}: ${o.probability}%`).join(' | ') : null;
+
+      return {
+        homeTeam: game.home_team,
+        awayTeam: game.away_team,
+        kickoff: new Date(game.commence_time).toLocaleString('en-US', {
+          timeZone: 'America/New_York',
+          weekday: 'short',
+          month: 'short',
+          day: 'numeric',
+          hour: 'numeric',
+          minute: '2-digit',
+        }),
+        mlRaw: ml ?? [],
+        moneyline: ml
+          ? ml.map((o) => `${o.name}: ${formatAmericanOdds(o.price)}`).join(' | ')
+          : 'Not available',
+        spread: spread
+          ? spread.map((o) => `${o.name} ${o.point && o.point > 0 ? '+' : ''}${o.point ?? ''}: ${formatAmericanOdds(o.price)}`).join(' | ')
+          : 'Not available',
+        totals: totals
+          ? totals.map((o) => `${o.name} ${o.point ?? ''}: ${formatAmericanOdds(o.price)}`).join(' | ')
+          : 'Not available',
+        homeStats: findTeamStats(standingsRows, game.home_team) ?? 'No group-stage record yet',
+        awayStats: findTeamStats(standingsRows, game.away_team) ?? 'No group-stage record yet',
+        polymarket: formatMarket(markets.polymarket),
+        kalshi: formatMarket(markets.kalshi),
+      };
+    })
+  );
 
   // Format golf data for AI
   const golfData = golfOdds
@@ -152,9 +165,9 @@ export async function GET() {
   // Build AI prompt
   const prompt = `You are a professional sports handicapper. For EVERY match listed below, produce ONE pick: "highestPercent" — whichever outcome has the HIGHEST PROBABILITY OF ACTUALLY WINNING, full stop. Odds/payout size is not a factor here — a -400 favorite you're confident in beats a +200 underdog you're not. This is often the favorite, but only pick it if the data actually supports it.
 
-Use everything provided below: the odds from the sportsbooks listed, each team's group-stage record (record, goal difference, points), and your own general knowledge of these national teams — squad quality, key players, typical tactical approach, and anything you know about current injuries or squad news. If you're relying on general knowledge rather than the data provided (e.g. injury news), say so plainly rather than stating it as verified fact — you do not have a live injury feed.
+Use everything provided below: the odds from the sportsbooks listed, Kalshi and Polymarket prediction market prices (these reflect real money betting on the actual outcome and are often sharper than sportsbook odds — when they disagree meaningfully with the sportsbook implied probability, that's a signal worth weighing and calling out), each team's group-stage record (record, goal difference, points), and your own general knowledge of these national teams — squad quality, key players, typical tactical approach, and anything you know about current injuries or squad news. If you're relying on general knowledge rather than the data provided (e.g. injury news), say so plainly rather than stating it as verified fact — you do not have a live injury feed.
 
-The explanation is shown in a dedicated detail view. Format it as 3-4 short bullet points, NOT one long paragraph — each bullet starts with "• " on its own line (use a real newline character between bullets). Keep the whole thing tight, roughly 60-90 words total across all bullets combined, but still information-dense — every bullet should carry a real, specific fact, not filler. Cover whichever of these are most relevant to the pick (you don't need all of them every time): what the odds imply and whether that's justified; the key form/stats angle (group-stage record, goal difference); the tactical or squad-quality factor; a key player, injury, or squad note (clearly flagged as general knowledge, not live data, if relevant); historical context between these teams if it matters. Write each bullet as a punchy, specific claim — no throat-clearing, no restating the obvious.
+The explanation is shown in a dedicated detail view. Format it as 3-4 short bullet points, NOT one long paragraph — each bullet starts with "• " on its own line (use a real newline character between bullets). Keep the whole thing tight, roughly 60-90 words total across all bullets combined, but still information-dense — every bullet should carry a real, specific fact, not filler. Cover whichever of these are most relevant to the pick (you don't need all of them every time): what the sportsbook odds imply and whether that's justified; what Kalshi/Polymarket imply and whether they agree or disagree with the sportsbooks; the key form/stats angle (group-stage record, goal difference); the tactical or squad-quality factor; a key player, injury, or squad note (clearly flagged as general knowledge, not live data, if relevant); historical context between these teams if it matters. Write each bullet as a punchy, specific claim — no throat-clearing, no restating the obvious.
 
 ${hasWCData ? `
 === WORLD CUP 2026 — UPCOMING MATCHES ===
@@ -164,6 +177,8 @@ Kickoff (ET): ${g.kickoff}
 Moneyline: ${g.moneyline}
 Spread: ${g.spread}
 Totals: ${g.totals}
+Polymarket: ${g.polymarket ?? 'Not available'}
+Kalshi: ${g.kalshi ?? 'Not available'}
 ${g.homeTeam} group-stage record: ${g.homeStats}
 ${g.awayTeam} group-stage record: ${g.awayStats}
 `).join('\n')}

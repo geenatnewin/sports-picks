@@ -18,8 +18,11 @@ function nyDateKey(date: Date): string {
 export async function getWorldCupOdds(): Promise<OddsGame[]> {
   if (!KEY) return [];
   try {
+    // FanDuel/DraftKings are the priority books, but we also shop a handful
+    // of other major regulated US sportsbooks for the best price. Up to 10
+    // bookmakers bills as 1 "region" on The Odds API, same cost as just 2.
     const res = await fetch(
-      `${BASE}/sports/soccer_fifa_world_cup/odds?apiKey=${KEY}&bookmakers=fanduel,draftkings&markets=h2h,spreads,totals&oddsFormat=american`,
+      `${BASE}/sports/soccer_fifa_world_cup/odds?apiKey=${KEY}&bookmakers=fanduel,draftkings,betmgm,williamhill_us,espnbet&markets=h2h,spreads,totals&oddsFormat=american`,
       { next: { revalidate: 1800 } }
     );
     if (!res.ok) return [];
