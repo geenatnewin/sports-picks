@@ -44,7 +44,7 @@ const INCLUDE_GOLF = false;
 
 // Preview mode — shows real matches/odds with fabricated picks, no AI call needed.
 // Set to false once a real ANTHROPIC_API_KEY is active.
-const MOCK_PICKS = true;
+const MOCK_PICKS = false;
 
 function buildMockWorldCup(data: { homeTeam: string; awayTeam: string; kickoff: string; mlRaw: { name: string; price: number }[] }[]) {
   return data.map((g) => {
