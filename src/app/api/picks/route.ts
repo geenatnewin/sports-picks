@@ -39,6 +39,42 @@ function findTeamStats(rows: StandingsRow[], teamName: string): string | null {
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
+// Escapes raw control characters (literal newlines, tabs, etc.) that appear
+// inside JSON string literals — the model is asked to use \n instead, but
+// this is a safety net in case it doesn't comply, since a single stray raw
+// newline makes the entire response fail JSON.parse.
+function sanitizeJsonText(text: string): string {
+  let result = '';
+  let inString = false;
+  let escaped = false;
+  for (const ch of text) {
+    if (inString) {
+      if (escaped) {
+        result += ch;
+        escaped = false;
+      } else if (ch === '\\') {
+        result += ch;
+        escaped = true;
+      } else if (ch === '"') {
+        result += ch;
+        inString = false;
+      } else if (ch === '\n') {
+        result += '\\n';
+      } else if (ch === '\r') {
+        result += '\\r';
+      } else if (ch === '\t') {
+        result += '\\t';
+      } else {
+        result += ch;
+      }
+    } else {
+      if (ch === '"') inString = true;
+      result += ch;
+    }
+  }
+  return result;
+}
+
 // Golf is switched off for now — set to true to bring it back.
 const INCLUDE_GOLF = false;
 
@@ -186,7 +222,7 @@ IMPORTANT: Refer to a tied-match outcome as "Tie", never "Draw", in both the pic
 
 IMPORTANT: Do NOT mention, cite, or name-drop "Kalshi", "Polymarket", "prediction markets", or their specific prices anywhere in the explanation text. Use that data silently to inform your pick and confidence — the explanation should read as your own analysis, sourced from odds, stats, and football knowledge only. If you're relying on general knowledge rather than the sportsbook/stats data provided (e.g. injury news), say so plainly rather than stating it as verified fact — you do not have a live injury feed.
 
-The explanation is shown in a dedicated detail view. Format it as 3-4 short bullet points, NOT one long paragraph — each bullet starts with "• " on its own line (use a real newline character between bullets). Keep the whole thing tight, roughly 60-90 words total across all bullets combined, but still information-dense — every bullet should carry a real, specific fact, not filler. Cover whichever of these are most relevant to the pick (you don't need all of them every time): what the sportsbook odds imply and whether that's justified; the key form/stats angle (group-stage record, goal difference); the tactical or squad-quality factor; a key player, injury, or squad note (clearly flagged as general knowledge, not live data, if relevant); historical context between these teams if it matters. Write each bullet as a punchy, specific claim — no throat-clearing, no restating the obvious.
+The explanation is shown in a dedicated detail view. Format it as 3-4 short bullet points, NOT one long paragraph — each bullet starts with "• ". Since this whole response must be valid JSON, separate bullets using the two-character escape sequence \n (backslash followed by the letter n) inside the JSON string — do NOT insert a raw/literal line break. Keep the whole thing tight, roughly 60-90 words total across all bullets combined, but still information-dense — every bullet should carry a real, specific fact, not filler. Cover whichever of these are most relevant to the pick (you don't need all of them every time): what the sportsbook odds imply and whether that's justified; the key form/stats angle (group-stage record, goal difference); the tactical or squad-quality factor; a key player, injury, or squad note (clearly flagged as general knowledge, not live data, if relevant); historical context between these teams if it matters. Write each bullet as a punchy, specific claim — no throat-clearing, no restating the obvious.
 
 ${hasWCData ? `
 === WORLD CUP 2026 — UPCOMING MATCHES ===
@@ -267,7 +303,7 @@ Rules:
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error('No JSON in AI response');
 
-    const picks = JSON.parse(jsonMatch[0]);
+    const picks = JSON.parse(sanitizeJsonText(jsonMatch[0]));
 
     const response: PicksResponse = {
       worldcup: picks.worldcup ?? [],
