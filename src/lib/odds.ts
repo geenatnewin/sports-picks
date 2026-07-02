@@ -6,6 +6,18 @@ const KEY = process.env.ODDS_API_KEY;
 // Only show matches happening today through this many days ahead.
 const MAX_DAYS_AHEAD = 1;
 
+// "Today"/"tomorrow" are always anchored to US Eastern time, regardless of
+// what timezone the server process itself runs in (Vercel runs UTC, which
+// can already be a calendar day ahead of Eastern near the day boundary).
+function nyDateKey(date: Date): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+}
+
 export async function getWorldCupOdds(): Promise<OddsGame[]> {
   if (!KEY) return [];
   try {
@@ -17,10 +29,14 @@ export async function getWorldCupOdds(): Promise<OddsGame[]> {
     const games: OddsGame[] = await res.json();
 
     const now = new Date();
-    const cutoff = new Date(now.getFullYear(), now.getMonth(), now.getDate() + MAX_DAYS_AHEAD, 23, 59, 59, 999);
+    const todayKey = nyDateKey(now);
+    const cutoffKey = nyDateKey(new Date(now.getTime() + MAX_DAYS_AHEAD * 24 * 60 * 60 * 1000));
+
     return games.filter((g) => {
       const kickoff = new Date(g.commence_time);
-      return kickoff >= now && kickoff <= cutoff;
+      if (kickoff < now) return false;
+      const kickoffKey = nyDateKey(kickoff);
+      return kickoffKey >= todayKey && kickoffKey <= cutoffKey;
     });
   } catch {
     return [];
