@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
-import { getWorldCupOdds, getGolfOdds, getBestLine, formatAmericanOdds } from '@/lib/odds';
+import { getWorldCupOdds, getGolfOdds, getBestLine, formatAmericanOdds, normalizeOutcomeName } from '@/lib/odds';
 import { getWorldCupStandings, getTeamRecentForm, summarizeRecentForm } from '@/lib/soccer';
 import { getTournamentPredictions, getGolfRankings } from '@/lib/golf';
 import { getPredictionMarkets } from '@/lib/predictionMarkets';
@@ -55,7 +55,7 @@ function buildMockWorldCup(data: { homeTeam: string; awayTeam: string; kickoff: 
       event: `${g.homeTeam} vs ${g.awayTeam}`,
       matchTime: g.kickoff,
       highestPercent: {
-        pick: favorite ? favorite.name : g.homeTeam,
+        pick: favorite ? normalizeOutcomeName(favorite.name) : g.homeTeam,
         betType: 'Moneyline',
         odds: favorite ? formatAmericanOdds(favorite.price) : 'N/A',
         confidence: 'High' as const,
@@ -122,7 +122,7 @@ export async function GET() {
         }),
         mlRaw: ml ?? [],
         moneyline: ml
-          ? ml.map((o) => `${o.name}: ${formatAmericanOdds(o.price)}`).join(' | ')
+          ? ml.map((o) => `${normalizeOutcomeName(o.name)}: ${formatAmericanOdds(o.price)}`).join(' | ')
           : 'Not available',
         spread: spread
           ? spread.map((o) => `${o.name} ${o.point && o.point > 0 ? '+' : ''}${o.point ?? ''}: ${formatAmericanOdds(o.price)}`).join(' | ')
@@ -181,6 +181,8 @@ export async function GET() {
   const prompt = `You are a professional sports handicapper. For EVERY match listed below, produce ONE pick: "highestPercent" — whichever outcome has the HIGHEST PROBABILITY OF ACTUALLY WINNING, full stop. Odds/payout size is not a factor here — a -400 favorite you're confident in beats a +200 underdog you're not. This is often the favorite, but only pick it if the data actually supports it.
 
 Use everything provided below to determine the pick and your confidence level: the odds from the sportsbooks listed, Kalshi and Polymarket prediction market prices (these reflect real money betting on the actual outcome and are often sharper than sportsbook odds — weigh them heavily when estimating true win probability, especially when they disagree with the sportsbook implied probability), each team's group-stage record (record, goal difference, points), each team's actual last 5 match results (a stronger "how are they playing right now" signal than the aggregate record — weight recent form heavily, especially if it diverges from the season-long record), and your own general knowledge of these national teams — squad quality, key players, typical tactical approach, and anything you know about current injuries or squad news.
+
+IMPORTANT: Refer to a tied-match outcome as "Tie", never "Draw", in both the pick and the explanation.
 
 IMPORTANT: Do NOT mention, cite, or name-drop "Kalshi", "Polymarket", "prediction markets", or their specific prices anywhere in the explanation text. Use that data silently to inform your pick and confidence — the explanation should read as your own analysis, sourced from odds, stats, and football knowledge only. If you're relying on general knowledge rather than the sportsbook/stats data provided (e.g. injury news), say so plainly rather than stating it as verified fact — you do not have a live injury feed.
 

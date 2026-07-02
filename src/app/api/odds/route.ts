@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getWorldCupOdds, getBestLine, formatAmericanOdds } from '@/lib/odds';
+import { getWorldCupOdds, getBestLine, formatAmericanOdds, normalizeOutcomeName } from '@/lib/odds';
 import { getMatchRecentForm } from '@/lib/soccer';
 
 const MARKET_LABELS: Record<string, string> = {
@@ -9,13 +9,14 @@ const MARKET_LABELS: Record<string, string> = {
 };
 
 function outcomeLabel(marketKey: string, name: string, point?: number): string {
+  const label = normalizeOutcomeName(name);
   if (marketKey === 'spreads' && point !== undefined) {
-    return `${name} ${point > 0 ? '+' : ''}${point}`;
+    return `${label} ${point > 0 ? '+' : ''}${point}`;
   }
   if (marketKey === 'totals' && point !== undefined) {
-    return `${name} ${point}`;
+    return `${label} ${point}`;
   }
-  return name;
+  return label;
 }
 
 export async function GET() {

@@ -45,7 +45,7 @@ function FormRow({ teamName, form }: { teamName: string; form: FormResult[] | nu
   if (!form || form.length === 0) return null;
   return (
     <div>
-      <p className="text-neutral-600 text-[11px] uppercase tracking-widest mb-1.5">{teamName} — Last {form.length}</p>
+      <p className="text-neutral-600 text-[11px] uppercase tracking-widest mb-1.5">{teamName} — L5</p>
       <div className="flex flex-wrap gap-1.5">
         {form.map((r, i) => (
           <span key={i} className={`text-[11px] px-1.5 py-0.5 rounded border whitespace-nowrap ${formResultStyles[r.result]}`}>

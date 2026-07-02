@@ -76,6 +76,11 @@ export function formatAmericanOdds(price: number): string {
   return price > 0 ? `+${price}` : `${price}`;
 }
 
+// Sportsbooks label the tied-match outcome "Draw" — we display it as "Tie" everywhere.
+export function normalizeOutcomeName(name: string): string {
+  return name === 'Draw' ? 'Tie' : name;
+}
+
 // Shop across every bookmaker for the best (most favorable to the bettor)
 // price on each outcome — a higher price is always better, whether it's
 // positive (+150 beats +120) or negative (-110 beats -150).
