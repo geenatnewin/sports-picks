@@ -73,11 +73,23 @@ export function formatAmericanOdds(price: number): string {
   return price > 0 ? `+${price}` : `${price}`;
 }
 
-// Pull best available line from bookmakers for a given market
+// Shop across every bookmaker for the best (most favorable to the bettor)
+// price on each outcome — a higher price is always better, whether it's
+// positive (+150 beats +120) or negative (-110 beats -150).
 export function getBestLine(game: OddsGame, marketKey: string) {
+  const bestByOutcome = new Map<string, { name: string; price: number; point?: number }>();
+
   for (const book of game.bookmakers) {
     const market = book.markets.find((m) => m.key === marketKey);
-    if (market) return market.outcomes;
+    if (!market) continue;
+    for (const outcome of market.outcomes) {
+      const key = `${outcome.name}|${outcome.point ?? ''}`;
+      const existing = bestByOutcome.get(key);
+      if (!existing || outcome.price > existing.price) {
+        bestByOutcome.set(key, outcome);
+      }
+    }
   }
-  return null;
+
+  return bestByOutcome.size > 0 ? Array.from(bestByOutcome.values()) : null;
 }
