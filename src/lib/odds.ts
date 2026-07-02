@@ -19,7 +19,7 @@ export async function getWorldCupOdds(): Promise<OddsGame[]> {
   if (!KEY) return [];
   try {
     const res = await fetch(
-      `${BASE}/sports/soccer_fifa_world_cup/odds?apiKey=${KEY}&regions=us&markets=h2h,spreads,totals&oddsFormat=american`,
+      `${BASE}/sports/soccer_fifa_world_cup/odds?apiKey=${KEY}&bookmakers=fanduel,draftkings&markets=h2h,spreads,totals&oddsFormat=american`,
       { next: { revalidate: 1800 } }
     );
     if (!res.ok) return [];
