@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { getWorldCupOdds, getGolfOdds, getBestLine, formatAmericanOdds } from '@/lib/odds';
-import { getWorldCupStandings } from '@/lib/soccer';
+import { getWorldCupStandings, getTeamRecentForm, summarizeRecentForm } from '@/lib/soccer';
 import { getTournamentPredictions, getGolfRankings } from '@/lib/golf';
 import { getPredictionMarkets } from '@/lib/predictionMarkets';
 import { PicksResponse } from '@/lib/types';
@@ -13,7 +13,7 @@ const CACHE_TTL_MS = 20 * 60 * 1000;
 let cache: { data: PicksResponse; expiresAt: number } | null = null;
 
 interface StandingsRow {
-  team: { name: string; shortName?: string };
+  team: { id: number; name: string; shortName?: string };
   position: number;
   playedGames: number;
   won: number;
@@ -24,11 +24,15 @@ interface StandingsRow {
   goalsAgainst: number;
 }
 
-function findTeamStats(rows: StandingsRow[], teamName: string): string | null {
+function findTeamRow(rows: StandingsRow[], teamName: string): StandingsRow | null {
   const needle = teamName.toLowerCase();
-  const row = rows.find(
-    (r) => r.team.name.toLowerCase() === needle || r.team.shortName?.toLowerCase() === needle
+  return (
+    rows.find((r) => r.team.name.toLowerCase() === needle || r.team.shortName?.toLowerCase() === needle) ?? null
   );
+}
+
+function findTeamStats(rows: StandingsRow[], teamName: string): string | null {
+  const row = findTeamRow(rows, teamName);
   if (!row) return null;
   return `${row.playedGames}P ${row.won}W-${row.draw}D-${row.lost}L, ${row.goalsFor}-${row.goalsAgainst} GF-GA, ${row.points}pts (group position ${row.position})`;
 }
@@ -93,6 +97,15 @@ export async function GET() {
         kalshi: null,
       }));
 
+      const homeRow = findTeamRow(standingsRows, game.home_team);
+      const awayRow = findTeamRow(standingsRows, game.away_team);
+      const [homeFormData, awayFormData] = await Promise.all([
+        homeRow ? getTeamRecentForm(homeRow.team.id).catch(() => null) : Promise.resolve(null),
+        awayRow ? getTeamRecentForm(awayRow.team.id).catch(() => null) : Promise.resolve(null),
+      ]);
+      const homeForm = homeRow ? summarizeRecentForm(homeFormData, homeRow.team.id) : null;
+      const awayForm = awayRow ? summarizeRecentForm(awayFormData, awayRow.team.id) : null;
+
       const formatMarket = (outcomes: { label: string; probability: number }[] | null) =>
         outcomes ? outcomes.map((o) => `${o.label}: ${o.probability}%`).join(' | ') : null;
 
@@ -119,6 +132,8 @@ export async function GET() {
           : 'Not available',
         homeStats: findTeamStats(standingsRows, game.home_team) ?? 'No group-stage record yet',
         awayStats: findTeamStats(standingsRows, game.away_team) ?? 'No group-stage record yet',
+        homeForm: homeForm ?? 'No recent match history',
+        awayForm: awayForm ?? 'No recent match history',
         polymarket: formatMarket(markets.polymarket),
         kalshi: formatMarket(markets.kalshi),
       };
@@ -165,7 +180,7 @@ export async function GET() {
   // Build AI prompt
   const prompt = `You are a professional sports handicapper. For EVERY match listed below, produce ONE pick: "highestPercent" — whichever outcome has the HIGHEST PROBABILITY OF ACTUALLY WINNING, full stop. Odds/payout size is not a factor here — a -400 favorite you're confident in beats a +200 underdog you're not. This is often the favorite, but only pick it if the data actually supports it.
 
-Use everything provided below to determine the pick and your confidence level: the odds from the sportsbooks listed, Kalshi and Polymarket prediction market prices (these reflect real money betting on the actual outcome and are often sharper than sportsbook odds — weigh them heavily when estimating true win probability, especially when they disagree with the sportsbook implied probability), each team's group-stage record (record, goal difference, points), and your own general knowledge of these national teams — squad quality, key players, typical tactical approach, and anything you know about current injuries or squad news.
+Use everything provided below to determine the pick and your confidence level: the odds from the sportsbooks listed, Kalshi and Polymarket prediction market prices (these reflect real money betting on the actual outcome and are often sharper than sportsbook odds — weigh them heavily when estimating true win probability, especially when they disagree with the sportsbook implied probability), each team's group-stage record (record, goal difference, points), each team's actual last 5 match results (a stronger "how are they playing right now" signal than the aggregate record — weight recent form heavily, especially if it diverges from the season-long record), and your own general knowledge of these national teams — squad quality, key players, typical tactical approach, and anything you know about current injuries or squad news.
 
 IMPORTANT: Do NOT mention, cite, or name-drop "Kalshi", "Polymarket", "prediction markets", or their specific prices anywhere in the explanation text. Use that data silently to inform your pick and confidence — the explanation should read as your own analysis, sourced from odds, stats, and football knowledge only. If you're relying on general knowledge rather than the sportsbook/stats data provided (e.g. injury news), say so plainly rather than stating it as verified fact — you do not have a live injury feed.
 
@@ -183,6 +198,8 @@ Polymarket: ${g.polymarket ?? 'Not available'}
 Kalshi: ${g.kalshi ?? 'Not available'}
 ${g.homeTeam} group-stage record: ${g.homeStats}
 ${g.awayTeam} group-stage record: ${g.awayStats}
+${g.homeTeam} last 5 results: ${g.homeForm}
+${g.awayTeam} last 5 results: ${g.awayForm}
 `).join('\n')}
 ` : 'No upcoming World Cup matches with posted odds right now.'}
 
