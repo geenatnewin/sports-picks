@@ -651,13 +651,14 @@ const getCachedMlbPicks = unstable_cache(generateMlbPicks, ['sports-picks-ai-pic
 
 export async function GET() {
   try {
-    // Run sequentially, not in parallel — both generators read/write the
-    // same shared pick-history Blob file on a cache miss, and concurrent
-    // reads-then-writes would race and one sport's update could clobber the
-    // other's. A few extra seconds of latency on a cold cache is an
-    // acceptable tradeoff for not silently losing pick history.
-    const worldcupResult = await getCachedWorldCupPicks();
-    const mlbResult = await getCachedMlbPicks();
+    // Run in parallel — on a cache miss this means one AI call's wait time
+    // instead of two back-to-back. Both generators read/write the same
+    // shared pick-history Blob file, so concurrent execution can theoretically
+    // race and one sport's calibration write could clobber the other's — but
+    // that file only feeds the "soft signal" track-record calibration text
+    // (see pickHistory.ts), never the picks themselves, and self-corrects
+    // next cache cycle. Not worth doubling user-facing latency to avoid.
+    const [worldcupResult, mlbResult] = await Promise.all([getCachedWorldCupPicks(), getCachedMlbPicks()]);
 
     return NextResponse.json({
       worldcup: worldcupResult.matches,

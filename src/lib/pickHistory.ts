@@ -137,10 +137,13 @@ function summarize(history: StoredPick[], sport: 'soccer' | 'mlb'): TrackRecordS
 // short track-record summary to feed into the AI prompt as a calibration
 // signal. New picks from the current run are recorded separately via
 // recordPicks() once the AI response is available.
-// NOTE: soccer and MLB picks must be generated sequentially, not in
-// parallel, whenever both call this + recordPicks() in the same request —
-// each call reads the full shared history file itself, so two concurrent
-// calls would race and one sport's writes could clobber the other's.
+// NOTE: if soccer and MLB picks are ever generated concurrently (they
+// currently are, in api/picks/route.ts, for latency), this + recordPicks()
+// each read/write the full shared history file, so a simultaneous cache-miss
+// for both sports can race — one sport's write can clobber the other's.
+// Accepted tradeoff: this file only feeds the "soft signal" calibration text
+// below, never the picks users see, and self-corrects on the next cache
+// cycle. Not worth serializing two AI calls (doubling latency) to avoid.
 export async function gradeAndSummarize(
   finishedScores: FinishedScore[],
   sport: 'soccer' | 'mlb'
