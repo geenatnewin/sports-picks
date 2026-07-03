@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { ParlayLeg } from '@/lib/parlay';
-import { MatchPick } from '@/lib/types';
+import { MatchPick, PickOption } from '@/lib/types';
 
 interface OddsOutcome {
   id: string;
@@ -94,12 +94,11 @@ function ConfidenceBadge({ confidence }: { confidence: 'High' | 'Medium' | 'Low'
   );
 }
 
-function AiPickSummary({ pick, onClick }: { pick: MatchPick; onClick: () => void }) {
-  const option = pick.highestPercent;
+function AiPickSummary({ label, option, onClick }: { label: string; option: PickOption; onClick: () => void }) {
   return (
     <button onClick={onClick} className="chip-elevated rounded-lg p-5 w-full text-left">
       <div className="flex items-center justify-between mb-3">
-        <p className="text-neutral-500 text-xs uppercase tracking-widest">Highest % to Hit</p>
+        <p className="text-neutral-500 text-xs uppercase tracking-widest">{label}</p>
         <ConfidenceBadge confidence={option.confidence} />
       </div>
       <div className="flex items-center justify-between gap-3">
@@ -116,8 +115,8 @@ function AiPickSummary({ pick, onClick }: { pick: MatchPick; onClick: () => void
   );
 }
 
-function PickDetailModal({ pick, onClose }: { pick: { event: string; matchTime: string; pick: MatchPick }; onClose: () => void }) {
-  const option = pick.pick.highestPercent;
+function PickDetailModal({ pick, onClose }: { pick: { event: string; matchTime: string; label: string; option: PickOption }; onClose: () => void }) {
+  const { option } = pick;
   return (
     <div
       onClick={onClose}
@@ -138,7 +137,7 @@ function PickDetailModal({ pick, onClose }: { pick: { event: string; matchTime: 
         <p className="text-neutral-600 text-xs mb-4">{pick.matchTime}</p>
 
         <div className="flex items-center justify-between mb-3">
-          <p className="text-neutral-500 text-xs uppercase tracking-widest">Highest % to Hit</p>
+          <p className="text-neutral-500 text-xs uppercase tracking-widest">{pick.label}</p>
           <ConfidenceBadge confidence={option.confidence} />
         </div>
         <div className="flex items-center justify-between gap-3 mb-4">
@@ -176,7 +175,7 @@ export default function MarketsBrowser({
 }) {
   const [matches, setMatches] = useState<OddsMatch[] | null>(null);
   const [loading, setLoading] = useState(true);
-  const [detailPick, setDetailPick] = useState<{ event: string; matchTime: string; pick: MatchPick } | null>(null);
+  const [detailPick, setDetailPick] = useState<{ event: string; matchTime: string; label: string; option: PickOption } | null>(null);
 
   useEffect(() => {
     fetch('/api/odds')
@@ -268,12 +267,23 @@ export default function MarketsBrowser({
               </div>
 
               {picksLoading ? (
-                <div className="chip-elevated rounded-lg p-4 h-24 animate-pulse" />
+                <div className="space-y-3">
+                  <div className="chip-elevated rounded-lg p-4 h-24 animate-pulse" />
+                  <div className="chip-elevated rounded-lg p-4 h-24 animate-pulse" />
+                </div>
               ) : pick ? (
-                <AiPickSummary
-                  pick={pick}
-                  onClick={() => setDetailPick({ event: match.event, matchTime: match.matchTime, pick })}
-                />
+                <div className="space-y-3">
+                  <AiPickSummary
+                    label="Highest % to Hit"
+                    option={pick.highestPercent}
+                    onClick={() => setDetailPick({ event: match.event, matchTime: match.matchTime, label: 'Highest % to Hit', option: pick.highestPercent })}
+                  />
+                  <AiPickSummary
+                    label="Highest Value"
+                    option={pick.highestValue}
+                    onClick={() => setDetailPick({ event: match.event, matchTime: match.matchTime, label: 'Highest Value', option: pick.highestValue })}
+                  />
+                </div>
               ) : aiFailed ? (
                 <p className="text-amber-500 text-xs">AI pick unavailable — check your ANTHROPIC_API_KEY</p>
               ) : null}

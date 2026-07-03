@@ -86,18 +86,22 @@ function buildMockWorldCup(data: { homeTeam: string; awayTeam: string; kickoff: 
   return data.map((g) => {
     const sorted = [...g.mlRaw].sort((a, b) => a.price - b.price); // most negative (favorite) first
     const favorite = sorted[0];
+    const secondFavorite = sorted[1] ?? favorite;
+
+    const mockOption = (outcome: typeof favorite) => ({
+      pick: outcome ? normalizeOutcomeName(outcome.name) : g.homeTeam,
+      betType: 'Moneyline',
+      odds: outcome ? formatAmericanOdds(outcome.price) : 'N/A',
+      confidence: 'High' as const,
+      explanation: `[Preview] Placeholder pick using real odds — not real analysis yet. Add a real ANTHROPIC_API_KEY to get actual reasoning here.`,
+      counterpoint: '[Preview] Placeholder — not real analysis yet.',
+    });
 
     return {
       event: `${g.homeTeam} vs ${g.awayTeam}`,
       matchTime: g.kickoff,
-      highestPercent: {
-        pick: favorite ? normalizeOutcomeName(favorite.name) : g.homeTeam,
-        betType: 'Moneyline',
-        odds: favorite ? formatAmericanOdds(favorite.price) : 'N/A',
-        confidence: 'High' as const,
-        explanation: `[Preview] Placeholder pick using real odds — not real analysis yet. Add a real ANTHROPIC_API_KEY to get actual reasoning here.`,
-        counterpoint: '[Preview] Placeholder — not real analysis yet.',
-      },
+      highestPercent: mockOption(favorite),
+      highestValue: mockOption(secondFavorite),
     };
   });
 }
@@ -196,7 +200,11 @@ async function generatePicks(): Promise<PicksResponse> {
   }
 
   // Build AI prompt
-  const prompt = `You are a professional sports handicapper. For EVERY match listed below, produce ONE pick: "highestPercent" — whichever outcome has the HIGHEST PROBABILITY OF ACTUALLY WINNING, full stop. Odds/payout size is not a factor here — a -400 favorite you're confident in beats a +200 underdog you're not. This is often the favorite, but only pick it if the data actually supports it.
+  const prompt = `You are a professional sports handicapper. For EVERY match listed below, produce TWO picks, each of which can be a Moneyline, Spread, or Totals selection — they don't have to be the same market or the same side:
+
+1. "highestPercent" — whichever outcome has the HIGHEST PROBABILITY OF ACTUALLY WINNING, full stop. Odds/payout size is not a factor here — a -400 favorite you're confident in beats a +200 underdog you're not. This is often the favorite, but only pick it if the data actually supports it.
+
+2. "highestValue" — the single best combination of a real, credible chance to win AND odds that pay out meaningfully better than a heavy favorite. This means your estimated true win probability for this outcome should be noticeably higher than what the odds imply (i.e. you think the market is underpricing it) — not just "whatever has the longest odds." It's fine (and often correct) for this to be the exact same pick as "highestPercent" when the biggest favorite is also the best value available (e.g. a -650 team that you'd actually price closer to -1000). But actively consider whether a different outcome on the same match — the underdog, the draw, a spread, or a totals line — offers a better risk/reward than just always defaulting to the favorite. Do not pick a real longshot with only a slim chance just because the payout is large.
 
 Use everything provided below to determine the pick and your confidence level: the odds from the sportsbooks listed, Kalshi and Polymarket prediction market prices (these reflect real money betting on the actual outcome and are often sharper than sportsbook odds — weigh them heavily when estimating true win probability, especially when they disagree with the sportsbook implied probability), each team's group-stage record (record, goal difference, points), each team's actual last 5 match results (a stronger "how are they playing right now" signal than the aggregate record — weight recent form heavily, especially if it diverges from the season-long record), and your own general knowledge of these national teams. That general knowledge should actively cover, wherever relevant: overall squad quality and depth; individual player tendencies and strengths (e.g. a team's top scorer's finishing quality, a key playmaker's creativity and passing range, a goalkeeper's shot-stopping reputation, a defender prone to mistakes); each team's typical tactical strategy and style of play (possession-based vs. counter-attacking, high press vs. low block, set-piece threat, defensive solidity, how they set up against stronger vs. weaker opponents); historical head-to-head results or tournament history between these two teams if it's notable; and anything you know about current injuries or squad news. Don't limit your reasoning to just the numeric stats provided — actively factor in this tactical and player-level knowledge, not just as a passing mention.
 
@@ -211,9 +219,9 @@ ${trackRecord.promptText ? `
 IMPORTANT: Here is your own track record on past picks, graded against actual results: ${trackRecord.promptText} Use this only as a light calibration signal — if a market type has been underperforming, lean a little more conservative (e.g. High → Medium) there specifically, and vice versa if it's been hitting well. This is a small sample, so don't let it override what the actual data for a given match tells you, and never mention this track record in the explanation text.
 ` : ''}
 
-IMPORTANT: Each pick also needs a "counterpoint" field — one short sentence giving the single best, most credible real reason the outcome you did NOT pick could still happen instead, grounded in the actual data/knowledge above (a stat, a tactical matchup, a specific player, recent form, historical head-to-head). Play devil's advocate honestly here — this should be a genuine case, not a throwaway line. If you truly don't see a credible case for the other side — the gap in quality, form, or matchup is too lopsided — say so plainly instead of manufacturing a weak reason, e.g. "No real case here — Argentina's talent gap over Cape Verde is too large to bet against them." Never contradict or undercut your own pick and confidence level; this is a risk-awareness note, not a second opinion.
+IMPORTANT: Both "highestPercent" and "highestValue" need their own "counterpoint" field — one short sentence giving the single best, most credible real reason the outcome you did NOT pick (for that specific pick) could still happen instead, grounded in the actual data/knowledge above (a stat, a tactical matchup, a specific player, recent form, historical head-to-head). Play devil's advocate honestly here — this should be a genuine case, not a throwaway line. If you truly don't see a credible case for the other side — the gap in quality, form, or matchup is too lopsided — say so plainly instead of manufacturing a weak reason, e.g. "No real case here — Argentina's talent gap over Cape Verde is too large to bet against them." Never contradict or undercut your own pick and confidence level; this is a risk-awareness note, not a second opinion.
 
-The explanation is shown in a dedicated detail view. Format it as 3-4 short bullet points, NOT one long paragraph — each bullet starts with "• ". Since this whole response must be valid JSON, separate bullets using the two-character escape sequence \n (backslash followed by the letter n) inside the JSON string — do NOT insert a raw/literal line break. Keep the whole thing tight, roughly 60-90 words total across all bullets combined, but still information-dense — every bullet should carry a real, specific fact, not filler. Cover whichever of these are most relevant to the pick (you don't need all of them every time): what the sportsbook odds imply and whether that's justified; the key form/stats angle (group-stage record, goal difference); a specific tactical/style-of-play matchup detail (pressing, possession, set pieces, how one team's approach exploits the other's weakness); a specific player tendency or player-level detail (a key scorer, playmaker, or defensive liability by name, clearly flagged as general knowledge, not live data); an injury or squad note if relevant (same caveat); historical head-to-head context if it matters. Prefer specific, named details (a player, a tactical trait, a stat) over generic statements like "has a strong squad." Write each bullet as a punchy, specific claim — no throat-clearing, no restating the obvious.
+Both picks need their own "explanation", shown in a dedicated detail view. Format each as 3-4 short bullet points, NOT one long paragraph — each bullet starts with "• ". Since this whole response must be valid JSON, separate bullets using the two-character escape sequence \n (backslash followed by the letter n) inside the JSON string — do NOT insert a raw/literal line break. Keep each explanation tight, roughly 60-90 words total across all bullets combined, but still information-dense — every bullet should carry a real, specific fact, not filler. Cover whichever of these are most relevant to that specific pick (you don't need all of them every time): what the sportsbook odds imply and whether that's justified; the key form/stats angle (group-stage record, goal difference); a specific tactical/style-of-play matchup detail (pressing, possession, set pieces, how one team's approach exploits the other's weakness); a specific player tendency or player-level detail (a key scorer, playmaker, or defensive liability by name, clearly flagged as general knowledge, not live data); an injury or squad note if relevant (same caveat); historical head-to-head context if it matters. For "highestValue" specifically, also explain briefly why it offers better value than just taking the biggest favorite. Prefer specific, named details (a player, a tactical trait, a stat) over generic statements like "has a strong squad." Write each bullet as a punchy, specific claim — no throat-clearing, no restating the obvious.
 
 ${hasWCData ? `
 === WORLD CUP 2026 — UPCOMING MATCHES ===
@@ -246,13 +254,21 @@ Return a JSON object with this exact structure:
         "confidence": "High",
         "explanation": "• Bullet one: a specific fact (e.g. odds/implied probability)\n• Bullet two: another specific fact (e.g. form or stats)\n• Bullet three: tactical, injury, or historical note if relevant",
         "counterpoint": "One short sentence on the best real reason the other outcome could happen instead, or that there isn't one."
+      },
+      "highestValue": {
+        "pick": "Team B",
+        "betType": "Moneyline",
+        "odds": "+220",
+        "confidence": "Medium",
+        "explanation": "• Same bullet-point format as above, but focused on why this is undervalued by the market\n• Another specific fact backing the value case",
+        "counterpoint": "One short sentence on the best real reason the other outcome could happen instead, or that there isn't one."
       }
     }
   ]
 }
 
 Rules:
-- Every match listed must get exactly one "highestPercent" entry — do not skip any match.
+- Every match listed must get exactly one "highestPercent" entry AND one "highestValue" entry — do not skip any match.
 - Consider all matches listed above, whether they're today or several days out — do not limit yourself to only today's games.
 - Include the match date in "matchTime" (e.g. "Fri, Jul 3 · 3:00 PM ET") so it's clear which day each pick is for.
 - Confidence: High = very likely to win, Medium = probably wins but real risk exists, Low = leaning this way but genuinely uncertain
@@ -261,7 +277,7 @@ Rules:
 
   const message = await client.messages.create({
     model: 'claude-sonnet-5',
-    max_tokens: 3000,
+    max_tokens: 5000, // two picks per match now instead of one, roughly doubling output size
     messages: [{ role: 'user', content: prompt }],
   });
 

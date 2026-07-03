@@ -11,6 +11,7 @@ export interface MatchPick {
   event: string;
   matchTime?: string;
   highestPercent: PickOption;
+  highestValue: PickOption;
 }
 
 export interface PicksResponse {
