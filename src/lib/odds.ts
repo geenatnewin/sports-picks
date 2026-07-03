@@ -15,31 +15,55 @@ function nyDateKey(date: Date): string {
   }).format(date);
 }
 
+// The odds endpoint alone can't tell us whether a match that already kicked
+// off is still in play or has finished, so we cross-check against the scores
+// endpoint's `completed` flag (covers the last day, which comfortably covers
+// a match plus stoppage/extra time).
+async function getCompletedMatchIds(): Promise<Set<string>> {
+  if (!KEY) return new Set();
+  try {
+    const res = await fetch(
+      `${BASE}/sports/soccer_fifa_world_cup/scores/?apiKey=${KEY}&daysFrom=1`,
+      { next: { revalidate: 300 } }
+    );
+    if (!res.ok) return new Set();
+    const scores: { id: string; completed: boolean }[] = await res.json();
+    return new Set(scores.filter((s) => s.completed).map((s) => s.id));
+  } catch {
+    return new Set();
+  }
+}
+
 export async function getWorldCupOdds(): Promise<OddsGame[]> {
   if (!KEY) return [];
   try {
     // FanDuel/DraftKings are the priority books, but we also shop a handful
     // of other major regulated US sportsbooks for the best price. Up to 10
     // bookmakers bills as 1 "region" on The Odds API, same cost as just 2.
-    const res = await fetch(
-      `${BASE}/sports/soccer_fifa_world_cup/odds?apiKey=${KEY}&bookmakers=fanduel,draftkings,betmgm,williamhill_us,espnbet&markets=h2h,spreads,totals&oddsFormat=american`,
-      { next: { revalidate: 1800 } }
-    );
+    const [res, completedIds] = await Promise.all([
+      fetch(
+        `${BASE}/sports/soccer_fifa_world_cup/odds?apiKey=${KEY}&bookmakers=fanduel,draftkings,betmgm,williamhill_us,espnbet&markets=h2h,spreads,totals&oddsFormat=american`,
+        { next: { revalidate: 1800 } }
+      ),
+      getCompletedMatchIds(),
+    ]);
     if (!res.ok) return [];
     const games: OddsGame[] = await res.json();
 
     const now = new Date();
     const todayKey = nyDateKey(now);
 
-    // Only games that haven't started yet, earliest first
-    const upcoming = games
-      .filter((g) => new Date(g.commence_time) >= now)
+    // Keep in-play matches (commence_time already passed) alongside upcoming
+    // ones — only drop matches the scores endpoint confirms are completed.
+    const notFinished = games
+      .filter((g) => !completedIds.has(g.id))
       .sort((a, b) => new Date(a.commence_time).getTime() - new Date(b.commence_time).getTime());
 
-    const todaysGames = upcoming.filter((g) => nyDateKey(new Date(g.commence_time)) === todayKey);
+    const todaysGames = notFinished.filter((g) => nyDateKey(new Date(g.commence_time)) === todayKey);
     if (todaysGames.length > 0) return todaysGames;
 
     // No games today — show just the single next upcoming game, nothing further out.
+    const upcoming = notFinished.filter((g) => new Date(g.commence_time) >= now);
     return upcoming.length > 0 ? [upcoming[0]] : [];
   } catch {
     return [];

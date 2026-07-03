@@ -31,6 +31,7 @@ interface OddsMatch {
   awayTeam: string;
   homeForm: FormResult[] | null;
   awayForm: FormResult[] | null;
+  isLive: boolean;
   matchTime: string;
   markets: OddsMarket[];
 }
@@ -184,7 +185,7 @@ export default function MarketsBrowser({
   if (!matches || matches.length === 0) {
     return (
       <div className="card-elevated rounded-lg p-6 text-center">
-        <p className="text-neutral-500 text-sm">No upcoming World Cup markets available right now</p>
+        <p className="text-neutral-500 text-sm">No World Cup markets available right now</p>
       </div>
     );
   }
@@ -197,7 +198,15 @@ export default function MarketsBrowser({
           return (
             <div key={match.gameId} className="card-elevated rounded-xl p-6">
               <p className="text-white/90 font-semibold text-base">{match.event}</p>
-              <p className="text-neutral-600 text-sm mb-4">{match.matchTime}</p>
+              <p className="text-neutral-600 text-sm mb-4 flex items-center gap-2">
+                {match.isLive && (
+                  <span className="inline-flex items-center gap-1 text-red-400 font-semibold text-xs uppercase tracking-wide">
+                    <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                    Live
+                  </span>
+                )}
+                {match.matchTime}
+              </p>
 
               {(match.homeForm || match.awayForm) && (
                 <div className="space-y-3 mb-5 pb-5 border-b border-white/[0.06]">

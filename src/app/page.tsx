@@ -33,7 +33,7 @@ function SectionHeader({
         <span className="text-xl opacity-70">{emoji}</span>
         <div>
           <h2 className="text-white/90 font-semibold text-base tracking-tight">{title}</h2>
-          <p className="text-neutral-600 text-xs">{count} upcoming pick{count !== 1 ? 's' : ''}</p>
+          <p className="text-neutral-600 text-xs">{count} pick{count !== 1 ? 's' : ''}</p>
         </div>
       </div>
       <svg

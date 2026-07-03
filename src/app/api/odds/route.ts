@@ -53,6 +53,7 @@ export async function GET() {
         awayTeam: game.away_team,
         homeForm,
         awayForm,
+        isLive: new Date(game.commence_time) < new Date(),
         matchTime: new Date(game.commence_time).toLocaleString('en-US', {
           timeZone: 'America/New_York',
           weekday: 'short',
