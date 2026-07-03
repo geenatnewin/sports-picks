@@ -153,8 +153,12 @@ function PickDetailModal({ pick, onClose }: { pick: { event: string; matchTime: 
         <p className="text-neutral-500 text-xs uppercase tracking-widest mb-2">Analysis</p>
         <p className="text-neutral-300 text-sm leading-relaxed whitespace-pre-line mb-4">{option.explanation}</p>
 
-        <p className="text-neutral-500 text-xs uppercase tracking-widest mb-2">Case for the Other Side</p>
-        <p className="text-neutral-300 text-sm leading-relaxed">{option.counterpoint}</p>
+        {option.counterpoint && (
+          <>
+            <p className="text-neutral-500 text-xs uppercase tracking-widest mb-2">Why It Might Not Hit</p>
+            <p className="text-neutral-300 text-sm leading-relaxed">{option.counterpoint}</p>
+          </>
+        )}
       </div>
     </div>
   );
@@ -273,16 +277,17 @@ export default function MarketsBrowser({
                 </div>
               ) : pick ? (
                 <div className="space-y-3">
-                  <AiPickSummary
-                    label="Highest % to Hit"
-                    option={pick.highestPercent}
-                    onClick={() => setDetailPick({ event: match.event, matchTime: match.matchTime, label: 'Highest % to Hit', option: pick.highestPercent })}
-                  />
-                  <AiPickSummary
-                    label="Highest Value"
-                    option={pick.highestValue}
-                    onClick={() => setDetailPick({ event: match.event, matchTime: match.matchTime, label: 'Highest Value', option: pick.highestValue })}
-                  />
+                  {pick.picks.map((option, i) => {
+                    const label = `Pick ${i + 1}`;
+                    return (
+                      <AiPickSummary
+                        key={i}
+                        label={label}
+                        option={option}
+                        onClick={() => setDetailPick({ event: match.event, matchTime: match.matchTime, label, option })}
+                      />
+                    );
+                  })}
                 </div>
               ) : aiFailed ? (
                 <p className="text-amber-500 text-xs">AI pick unavailable — check your ANTHROPIC_API_KEY</p>

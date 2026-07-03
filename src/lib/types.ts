@@ -4,14 +4,13 @@ export interface PickOption {
   odds: string;
   confidence: 'High' | 'Medium' | 'Low';
   explanation: string;
-  counterpoint: string;
+  counterpoint: string | null;
 }
 
 export interface MatchPick {
   event: string;
   matchTime?: string;
-  highestPercent: PickOption;
-  highestValue: PickOption;
+  picks: PickOption[]; // exactly 2, ranked most likely to hit first
 }
 
 export interface PicksResponse {

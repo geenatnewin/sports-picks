@@ -95,14 +95,13 @@ function buildMockWorldCup(data: { homeTeam: string; awayTeam: string; kickoff: 
       odds: outcome ? formatAmericanOdds(outcome.price) : 'N/A',
       confidence: 'High' as const,
       explanation: `[Preview] Placeholder pick using real odds — not real analysis yet. Add a real ANTHROPIC_API_KEY to get actual reasoning here.`,
-      counterpoint: '[Preview] Placeholder — not real analysis yet.',
+      counterpoint: null,
     });
 
     return {
       event: `${g.homeTeam} vs ${g.awayTeam}`,
       matchTime: g.kickoff,
-      highestPercent: mockOption(favorite),
-      highestValue: mockOption(secondFavorite),
+      picks: [mockOption(favorite), mockOption(secondFavorite)],
     };
   });
 }
@@ -218,11 +217,12 @@ async function generatePicks(): Promise<PicksResponse> {
   }
 
   // Build AI prompt
-  const prompt = `You are a professional sports handicapper. For EVERY match listed below, produce TWO picks. Each pick can be ANY of: Moneyline, Spread, Totals, Anytime Goal Scorer, or 2+ Assists (when those player props are listed for that match) — they don't have to be the same market, side, or player:
+  const prompt = `You are a professional sports handicapper. For EVERY match listed below, produce your TOP 2 picks, ranked most likely to hit first. Consider ALL available markets as candidates: Moneyline (including Tie), Spread, Totals, Anytime Goal Scorer, and 2+ Assists (when those player props are listed for that match) — genuinely weigh all of them, don't default to Moneyline out of habit and don't reach for a player prop just for variety either.
 
-1. "highestPercent" — whichever outcome has the HIGHEST PROBABILITY OF ACTUALLY WINNING, full stop. Odds/payout size is not a factor here — a -400 favorite you're confident in beats a +200 underdog you're not. This is usually a Moneyline favorite, but only pick a player prop instead if it's genuinely a near-lock (e.g. a team's clear #1 striker at a very short price against a weak defense) — don't reach for a player prop just for variety.
-
-2. "highestValue" — the single best combination of a real, credible chance to win AND odds that pay out meaningfully better than a heavy favorite. This means your estimated true probability for this outcome should be noticeably higher than what the odds imply (i.e. you think the market is underpricing it) — not just "whatever has the longest odds." It's fine (and often correct) for this to be the exact same pick as "highestPercent" when the biggest favorite is also the best value available (e.g. a -650 team that you'd actually price closer to -1000). But actively consider whether a different outcome on the same match — the underdog, the draw, a spread, a totals line, or a specific player prop — offers a better risk/reward than just always defaulting to the favorite. A player prop is a good "highestValue" candidate when a team's clear top scorer or an in-form attacker is priced longer than their actual scoring threat warrants. Do not pick a real longshot with only a slim chance just because the payout is large — a 2+ assists prop at +25000 is not a value pick just because it pays a lot.
+Ranking rules:
+- Rank purely by how confident you genuinely are that each pick will actually hit — this is a "will it happen" ranking, not a payout ranking. Pick 1 is your single most confident outcome for this match; Pick 2 is your second most confident outcome, and it must still be a real, credible pick you'd genuinely bet on — not just "whatever's next best if nothing else is likely."
+- Form your own probability judgment from the stats, prediction-market data, and football knowledge below — do NOT just mechanically pick the two shortest-odds/lowest-payout favorites on the board because they look "safe." If your analysis says the market is off on a given outcome (over- or under-pricing it), weight your own read over the raw odds. It's fine and often correct for your top picks to match the market favorites when they genuinely are the most likely outcomes — just make sure you actually did the analysis rather than defaulting to it.
+- Don't fill both slots with player props — Moneyline/Tie, Spread, and Totals are real, often higher-probability markets. Only pick a player prop when it's genuinely one of your two most confident outcomes for this specific match (e.g. a team's clear #1 striker at a very short price against a weak defense), not by default.
 
 IMPORTANT: The "Anytime goal scorer" and "2+ assists" lines below are pre-filtered to only the handful of most likely candidates per match — treat this as the realistic shortlist, not the full roster. If a match has no such lines listed, no player props are available for it — don't invent players or props that aren't shown.
 
@@ -239,9 +239,9 @@ ${trackRecord.promptText ? `
 IMPORTANT: Here is your own track record on past picks, graded against actual results: ${trackRecord.promptText} Use this only as a light calibration signal — if a market type has been underperforming, lean a little more conservative (e.g. High → Medium) there specifically, and vice versa if it's been hitting well. This is a small sample, so don't let it override what the actual data for a given match tells you, and never mention this track record in the explanation text.
 ` : ''}
 
-IMPORTANT: Both "highestPercent" and "highestValue" need their own "counterpoint" field — one short sentence giving the single best, most credible real reason the outcome you did NOT pick (for that specific pick) could still happen instead, grounded in the actual data/knowledge above (a stat, a tactical matchup, a specific player, recent form, historical head-to-head). Play devil's advocate honestly here — this should be a genuine case, not a throwaway line. If you truly don't see a credible case for the other side — the gap in quality, form, or matchup is too lopsided — say so plainly instead of manufacturing a weak reason, e.g. "No real case here — Argentina's talent gap over Cape Verde is too large to bet against them." Never contradict or undercut your own pick and confidence level; this is a risk-awareness note, not a second opinion.
+IMPORTANT: Each pick may have a "counterpoint" field — one short sentence giving the single best, most credible real reason this specific pick might NOT hit, grounded in the actual data/knowledge above (a stat, a tactical matchup, a specific player, recent form, historical head-to-head). Play devil's advocate honestly here — this should be a genuine, real risk, not a throwaway line. If a pick is genuinely close to a lock — the gap in quality, form, or matchup is too lopsided for a real counter-case to exist — set "counterpoint" to null instead of manufacturing a weak reason. Do NOT write filler like "No real case here" — either give a real, specific reason it might not hit, or use null. Never contradict or undercut your own pick and confidence level; this is a risk-awareness note when a genuine one exists, not a second opinion.
 
-Both picks need their own "explanation", shown in a dedicated detail view. Format each as 3-4 short bullet points, NOT one long paragraph — each bullet starts with "• ". Since this whole response must be valid JSON, separate bullets using the two-character escape sequence \n (backslash followed by the letter n) inside the JSON string — do NOT insert a raw/literal line break. Keep each explanation tight, roughly 60-90 words total across all bullets combined, but still information-dense — every bullet should carry a real, specific fact, not filler. Cover whichever of these are most relevant to that specific pick (you don't need all of them every time): what the sportsbook odds imply and whether that's justified; the key form/stats angle (group-stage record, goal difference); a specific tactical/style-of-play matchup detail (pressing, possession, set pieces, how one team's approach exploits the other's weakness); a specific player tendency or player-level detail (a key scorer, playmaker, or defensive liability by name, clearly flagged as general knowledge, not live data); an injury or squad note if relevant (same caveat); historical head-to-head context if it matters. For "highestValue" specifically, also explain briefly why it offers better value than just taking the biggest favorite. Prefer specific, named details (a player, a tactical trait, a stat) over generic statements like "has a strong squad." Write each bullet as a punchy, specific claim — no throat-clearing, no restating the obvious.
+Each pick needs its own "explanation", shown in a dedicated detail view. Format each as 3-4 short bullet points, NOT one long paragraph — each bullet starts with "• ". Since this whole response must be valid JSON, separate bullets using the two-character escape sequence \n (backslash followed by the letter n) inside the JSON string — do NOT insert a raw/literal line break. Keep each explanation tight, roughly 60-90 words total across all bullets combined, but still information-dense — every bullet should carry a real, specific fact, not filler. Cover whichever of these are most relevant to that specific pick (you don't need all of them every time): what the sportsbook odds imply and whether that's justified; the key form/stats angle (group-stage record, goal difference); a specific tactical/style-of-play matchup detail (pressing, possession, set pieces, how one team's approach exploits the other's weakness); a specific player tendency or player-level detail (a key scorer, playmaker, or defensive liability by name, clearly flagged as general knowledge, not live data); an injury or squad note if relevant (same caveat); historical head-to-head context if it matters. Prefer specific, named details (a player, a tactical trait, a stat) over generic statements like "has a strong squad." Write each bullet as a punchy, specific claim — no throat-clearing, no restating the obvious.
 
 ${hasWCData ? `
 === WORLD CUP 2026 — UPCOMING MATCHES ===
@@ -269,28 +269,31 @@ Return a JSON object with this exact structure:
     {
       "event": "Team A vs Team B",
       "matchTime": "Fri, Jul 3 · 3:00 PM ET",
-      "highestPercent": {
-        "pick": "Team A -0.5",
-        "betType": "Spread",
-        "odds": "+110",
-        "confidence": "High",
-        "explanation": "• Bullet one: a specific fact (e.g. odds/implied probability)\n• Bullet two: another specific fact (e.g. form or stats)\n• Bullet three: tactical, injury, or historical note if relevant",
-        "counterpoint": "One short sentence on the best real reason the other outcome could happen instead, or that there isn't one."
-      },
-      "highestValue": {
-        "pick": "Team B",
-        "betType": "Moneyline",
-        "odds": "+220",
-        "confidence": "Medium",
-        "explanation": "• Same bullet-point format as above, but focused on why this is undervalued by the market\n• Another specific fact backing the value case",
-        "counterpoint": "One short sentence on the best real reason the other outcome could happen instead, or that there isn't one."
-      }
+      "picks": [
+        {
+          "pick": "Team A -0.5",
+          "betType": "Spread",
+          "odds": "+110",
+          "confidence": "High",
+          "explanation": "• Bullet one: a specific fact (e.g. odds/implied probability)\n• Bullet two: another specific fact (e.g. form or stats)\n• Bullet three: tactical, injury, or historical note if relevant",
+          "counterpoint": null
+        },
+        {
+          "pick": "Tie",
+          "betType": "Moneyline",
+          "odds": "+220",
+          "confidence": "Medium",
+          "explanation": "• Same bullet-point format as above",
+          "counterpoint": "One short sentence on the best real reason this might not hit."
+        }
+      ]
     }
   ]
 }
 
 Rules:
-- Every match listed must get exactly one "highestPercent" entry AND one "highestValue" entry — do not skip any match.
+- Every match listed must get exactly 2 entries in "picks", ranked most likely to hit first — do not skip any match, and do not return more or fewer than 2.
+- "counterpoint" must be either a real, specific sentence or the JSON value null — never an empty string or a placeholder like "No real case here."
 - Consider all matches listed above, whether they're today or several days out — do not limit yourself to only today's games.
 - Include the match date in "matchTime" (e.g. "Fri, Jul 3 · 3:00 PM ET") so it's clear which day each pick is for.
 - Confidence: High = very likely to win, Medium = probably wins but real risk exists, Low = leaning this way but genuinely uncertain
@@ -299,7 +302,7 @@ Rules:
 
   const message = await client.messages.create({
     model: 'claude-sonnet-5',
-    max_tokens: 8000, // two picks per match now instead of one, roughly doubling output size
+    max_tokens: 8000, // two picks per match, each with its own explanation + counterpoint
     messages: [{ role: 'user', content: prompt }],
   });
 
@@ -320,25 +323,27 @@ Rules:
     console.error('JSON parse failed. stop_reason:', message.stop_reason, 'raw:', jsonMatch[0].slice(0, 3000));
     throw err;
   }
-  const worldcupPicks: { event: string; highestPercent: { pick: string; betType: string; confidence: 'High' | 'Medium' | 'Low' } }[] = picks.worldcup ?? [];
+  const worldcupPicks: { event: string; picks: { pick: string; betType: string; confidence: 'High' | 'Medium' | 'Low' }[] }[] = picks.worldcup ?? [];
 
   // Record this run's picks against their real match IDs so they can be
   // graded once the games finish — matched back to wcData by event string,
-  // the same "Team A vs Team B" key the AI is asked to echo back.
+  // the same "Team A vs Team B" key the AI is asked to echo back. Only the
+  // top-ranked pick (index 0) is tracked for calibration, same as before.
   const wcByEvent = new Map(wcData.map((g) => [`${g.homeTeam} vs ${g.awayTeam}`, g]));
   const newPickInputs = worldcupPicks
     .map((p) => {
       const game = wcByEvent.get(p.event);
-      if (!game) return null;
+      const topPick = p.picks?.[0];
+      if (!game || !topPick) return null;
       return {
         gameId: game.gameId,
         event: p.event,
         homeTeam: game.homeTeam,
         awayTeam: game.awayTeam,
         kickoff: game.kickoffISO,
-        betType: p.highestPercent.betType,
-        pick: p.highestPercent.pick,
-        confidence: p.highestPercent.confidence,
+        betType: topPick.betType,
+        pick: topPick.pick,
+        confidence: topPick.confidence,
       };
     })
     .filter((p): p is NonNullable<typeof p> => p !== null);
