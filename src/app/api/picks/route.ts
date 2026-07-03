@@ -4,6 +4,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { getWorldCupOdds, getBestLine, getLineDivergence, getFinishedScores, formatAmericanOdds, normalizeOutcomeName } from '@/lib/odds';
 import { getWorldCupStandings, getTeamRecentForm, summarizeRecentForm } from '@/lib/soccer';
 import { getPredictionMarkets } from '@/lib/predictionMarkets';
+import { getWorldCupPlayerProps } from '@/lib/propline';
 import { gradeAndSummarize, recordPicks } from '@/lib/pickHistory';
 import { PicksResponse } from '@/lib/types';
 
@@ -185,6 +186,23 @@ async function generatePicks(): Promise<PicksResponse> {
     })
   );
 
+  // Player props (anytime goalscorer, 2+ assists) from PropLine, matched to
+  // these matches by team names — PropLine uses its own event IDs. Fetched
+  // separately since it's a distinct provider from The Odds API, then merged
+  // onto each match so the prompt template can read it like any other field.
+  const playerPropsByMatch = await getWorldCupPlayerProps(
+    wcData.map((g) => ({ homeTeam: g.homeTeam, awayTeam: g.awayTeam }))
+  ).catch(() => new Map<string, { anytimeScorers: string | null; twoPlusAssists: string | null }>());
+
+  const wcDataWithProps = wcData.map((g) => {
+    const props = playerPropsByMatch.get(`${g.homeTeam} vs ${g.awayTeam}`);
+    return {
+      ...g,
+      anytimeScorers: props?.anytimeScorers ?? null,
+      twoPlusAssists: props?.twoPlusAssists ?? null,
+    };
+  });
+
   const hasWCData = wcData.length > 0;
 
   if (!hasWCData && !process.env.ANTHROPIC_API_KEY) {
@@ -200,11 +218,13 @@ async function generatePicks(): Promise<PicksResponse> {
   }
 
   // Build AI prompt
-  const prompt = `You are a professional sports handicapper. For EVERY match listed below, produce TWO picks, each of which can be a Moneyline, Spread, or Totals selection — they don't have to be the same market or the same side:
+  const prompt = `You are a professional sports handicapper. For EVERY match listed below, produce TWO picks. Each pick can be ANY of: Moneyline, Spread, Totals, Anytime Goal Scorer, or 2+ Assists (when those player props are listed for that match) — they don't have to be the same market, side, or player:
 
-1. "highestPercent" — whichever outcome has the HIGHEST PROBABILITY OF ACTUALLY WINNING, full stop. Odds/payout size is not a factor here — a -400 favorite you're confident in beats a +200 underdog you're not. This is often the favorite, but only pick it if the data actually supports it.
+1. "highestPercent" — whichever outcome has the HIGHEST PROBABILITY OF ACTUALLY WINNING, full stop. Odds/payout size is not a factor here — a -400 favorite you're confident in beats a +200 underdog you're not. This is usually a Moneyline favorite, but only pick a player prop instead if it's genuinely a near-lock (e.g. a team's clear #1 striker at a very short price against a weak defense) — don't reach for a player prop just for variety.
 
-2. "highestValue" — the single best combination of a real, credible chance to win AND odds that pay out meaningfully better than a heavy favorite. This means your estimated true win probability for this outcome should be noticeably higher than what the odds imply (i.e. you think the market is underpricing it) — not just "whatever has the longest odds." It's fine (and often correct) for this to be the exact same pick as "highestPercent" when the biggest favorite is also the best value available (e.g. a -650 team that you'd actually price closer to -1000). But actively consider whether a different outcome on the same match — the underdog, the draw, a spread, or a totals line — offers a better risk/reward than just always defaulting to the favorite. Do not pick a real longshot with only a slim chance just because the payout is large.
+2. "highestValue" — the single best combination of a real, credible chance to win AND odds that pay out meaningfully better than a heavy favorite. This means your estimated true probability for this outcome should be noticeably higher than what the odds imply (i.e. you think the market is underpricing it) — not just "whatever has the longest odds." It's fine (and often correct) for this to be the exact same pick as "highestPercent" when the biggest favorite is also the best value available (e.g. a -650 team that you'd actually price closer to -1000). But actively consider whether a different outcome on the same match — the underdog, the draw, a spread, a totals line, or a specific player prop — offers a better risk/reward than just always defaulting to the favorite. A player prop is a good "highestValue" candidate when a team's clear top scorer or an in-form attacker is priced longer than their actual scoring threat warrants. Do not pick a real longshot with only a slim chance just because the payout is large — a 2+ assists prop at +25000 is not a value pick just because it pays a lot.
+
+IMPORTANT: The "Anytime goal scorer" and "2+ assists" lines below are pre-filtered to only the handful of most likely candidates per match — treat this as the realistic shortlist, not the full roster. If a match has no such lines listed, no player props are available for it — don't invent players or props that aren't shown.
 
 Use everything provided below to determine the pick and your confidence level: the odds from the sportsbooks listed, Kalshi and Polymarket prediction market prices (these reflect real money betting on the actual outcome and are often sharper than sportsbook odds — weigh them heavily when estimating true win probability, especially when they disagree with the sportsbook implied probability), each team's group-stage record (record, goal difference, points), each team's actual last 5 match results (a stronger "how are they playing right now" signal than the aggregate record — weight recent form heavily, especially if it diverges from the season-long record), and your own general knowledge of these national teams. That general knowledge should actively cover, wherever relevant: overall squad quality and depth; individual player tendencies and strengths (e.g. a team's top scorer's finishing quality, a key playmaker's creativity and passing range, a goalkeeper's shot-stopping reputation, a defender prone to mistakes); each team's typical tactical strategy and style of play (possession-based vs. counter-attacking, high press vs. low block, set-piece threat, defensive solidity, how they set up against stronger vs. weaker opponents); historical head-to-head results or tournament history between these two teams if it's notable; and anything you know about current injuries or squad news. Don't limit your reasoning to just the numeric stats provided — actively factor in this tactical and player-level knowledge, not just as a passing mention.
 
@@ -225,7 +245,7 @@ Both picks need their own "explanation", shown in a dedicated detail view. Forma
 
 ${hasWCData ? `
 === WORLD CUP 2026 — UPCOMING MATCHES ===
-${wcData.map((g, i) => `
+${wcDataWithProps.map((g, i) => `
 Match ${i + 1}: ${g.homeTeam} vs ${g.awayTeam}
 Kickoff (ET): ${g.kickoff}
 Moneyline: ${g.moneyline}
@@ -237,6 +257,8 @@ ${g.homeTeam} group-stage record: ${g.homeStats}
 ${g.awayTeam} group-stage record: ${g.awayStats}
 ${g.homeTeam} last 5 results: ${g.homeForm}
 ${g.awayTeam} last 5 results: ${g.awayForm}
+${g.anytimeScorers ? `Anytime goal scorer (most likely candidates): ${g.anytimeScorers}` : ''}
+${g.twoPlusAssists ? `2+ assists in the match (longshot props): ${g.twoPlusAssists}` : ''}
 ${g.lineDivergence.flagged ? `Line divergence: FLAGGED — sportsbooks disagree by ~${g.lineDivergence.maxSpreadPct} points on ${g.lineDivergence.outcome}'s implied probability` : ''}
 `).join('\n')}
 ` : 'No upcoming World Cup matches with posted odds right now.'}
