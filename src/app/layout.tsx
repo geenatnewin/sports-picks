@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Dylan Harper's \"Trust Me\" Locks",
-  description: "AI-assisted sports picks — World Cup and Golf",
+  description: "AI-assisted World Cup sports picks",
 };
 
 export default function RootLayout({

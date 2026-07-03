@@ -152,7 +152,10 @@ function PickDetailModal({ pick, onClose }: { pick: { event: string; matchTime: 
         </div>
 
         <p className="text-neutral-500 text-xs uppercase tracking-widest mb-2">Analysis</p>
-        <p className="text-neutral-300 text-sm leading-relaxed whitespace-pre-line">{option.explanation}</p>
+        <p className="text-neutral-300 text-sm leading-relaxed whitespace-pre-line mb-4">{option.explanation}</p>
+
+        <p className="text-neutral-500 text-xs uppercase tracking-widest mb-2">When to Bet</p>
+        <p className="text-neutral-300 text-sm leading-relaxed">{option.timing}</p>
       </div>
     </div>
   );

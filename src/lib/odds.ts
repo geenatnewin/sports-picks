@@ -115,32 +115,6 @@ export async function getWorldCupOdds(): Promise<OddsGame[]> {
   }
 }
 
-export async function getGolfOdds(): Promise<{ tournament: string; games: OddsGame[] } | null> {
-  if (!KEY) return null;
-  // Try active golf tournaments in order of likelihood
-  const candidates = [
-    'golf_the_open_championship',
-    'golf_pga_championship',
-    'golf_us_open',
-    'golf_masters_tournament',
-    'golf_pga_tour',
-  ];
-  for (const sport of candidates) {
-    try {
-      const res = await fetch(
-        `${BASE}/sports/${sport}/odds?apiKey=${KEY}&regions=us&markets=outrights&oddsFormat=american`,
-        { next: { revalidate: 3600 } }
-      );
-      if (!res.ok) continue;
-      const games: OddsGame[] = await res.json();
-      if (games.length > 0) return { tournament: sport, games };
-    } catch {
-      continue;
-    }
-  }
-  return null;
-}
-
 export function formatAmericanOdds(price: number): string {
   return price > 0 ? `+${price}` : `${price}`;
 }

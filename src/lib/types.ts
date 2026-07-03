@@ -1,20 +1,10 @@
-export interface Pick {
-  sport: 'worldcup' | 'golf';
-  event: string;
-  pick: string;
-  betType: string;
-  odds: string;
-  confidence: 'High' | 'Medium' | 'Low';
-  explanation: string;
-  matchTime?: string;
-}
-
 export interface PickOption {
   pick: string;
   betType: string;
   odds: string;
   confidence: 'High' | 'Medium' | 'Low';
   explanation: string;
+  timing: string;
 }
 
 export interface MatchPick {
@@ -25,7 +15,6 @@ export interface MatchPick {
 
 export interface PicksResponse {
   worldcup: MatchPick[];
-  golf: Pick[];
   generatedAt: string;
   errors: string[];
 }

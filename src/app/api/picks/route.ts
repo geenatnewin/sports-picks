@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server';
 import { unstable_cache } from 'next/cache';
 import Anthropic from '@anthropic-ai/sdk';
-import { getWorldCupOdds, getGolfOdds, getBestLine, getLineDivergence, getFinishedScores, formatAmericanOdds, normalizeOutcomeName } from '@/lib/odds';
+import { getWorldCupOdds, getBestLine, getLineDivergence, getFinishedScores, formatAmericanOdds, normalizeOutcomeName } from '@/lib/odds';
 import { getWorldCupStandings, getTeamRecentForm, summarizeRecentForm } from '@/lib/soccer';
-import { getTournamentPredictions, getGolfRankings } from '@/lib/golf';
 import { getPredictionMarkets } from '@/lib/predictionMarkets';
 import { gradeAndSummarize, recordPicks } from '@/lib/pickHistory';
+import { recordSnapshotsAndDescribeMovement } from '@/lib/oddsHistory';
 import { PicksResponse } from '@/lib/types';
 
 // Cache the generated picks for 20 minutes — repeated Refresh presses or page
@@ -79,9 +79,6 @@ function sanitizeJsonText(text: string): string {
   return result;
 }
 
-// Golf is switched off for now — set to true to bring it back.
-const INCLUDE_GOLF = false;
-
 // Preview mode — shows real matches/odds with fabricated picks, no AI call needed.
 // Set to false once a real ANTHROPIC_API_KEY is active.
 const MOCK_PICKS = false;
@@ -100,6 +97,7 @@ function buildMockWorldCup(data: { homeTeam: string; awayTeam: string; kickoff: 
         odds: favorite ? formatAmericanOdds(favorite.price) : 'N/A',
         confidence: 'High' as const,
         explanation: `[Preview] Placeholder pick using real odds — not real analysis yet. Add a real ANTHROPIC_API_KEY to get actual reasoning here.`,
+        timing: '[Preview] Placeholder — not real timing analysis yet.',
       },
     };
   });
@@ -109,12 +107,9 @@ async function generatePicks(): Promise<PicksResponse> {
   const errors: string[] = [];
 
   // Fetch all data in parallel
-  const [wcOdds, wcStandings, golfOdds, golfPreds, golfRankings, finishedScores] = await Promise.all([
+  const [wcOdds, wcStandings, finishedScores] = await Promise.all([
     getWorldCupOdds().catch(() => { errors.push('World Cup odds unavailable'); return []; }),
     getWorldCupStandings().catch(() => { errors.push('World Cup standings unavailable'); return null; }),
-    INCLUDE_GOLF ? getGolfOdds().catch(() => { errors.push('Golf odds unavailable'); return null; }) : Promise.resolve(null),
-    INCLUDE_GOLF ? getTournamentPredictions().catch(() => { errors.push('Golf predictions unavailable'); return null; }) : Promise.resolve(null),
-    INCLUDE_GOLF ? getGolfRankings().catch(() => { errors.push('Golf rankings unavailable'); return null; }) : Promise.resolve(null),
     getFinishedScores().catch(() => []),
   ]);
 
@@ -187,34 +182,27 @@ async function generatePicks(): Promise<PicksResponse> {
     })
   );
 
-  // Format golf data for AI
-  const golfData = golfOdds
-    ? {
-        tournament: golfOdds.tournament.replace(/_/g, ' ').toUpperCase(),
-        topOdds: golfOdds.games[0]?.bookmakers[0]?.markets[0]?.outcomes
-          .sort((a, b) => a.price - b.price)
-          .slice(0, 20)
-          .map((o) => `${o.name}: ${formatAmericanOdds(o.price)}`) ?? [],
-        dgPredictions: golfPreds?.baseline_history_fit?.slice(0, 10).map((p: Record<string, unknown>) =>
-          `${p.player_name}: Win% ${((p.win_prob as number) * 100).toFixed(1)}%`
-        ) ?? [],
-        rankings: golfRankings?.rankings?.slice(0, 10).map((r: Record<string, unknown>) =>
-          `${r.player_name} (DG rank: ${r.dg_rank})`
-        ) ?? [],
-      }
-    : null;
+  // Snapshot current moneyline prices for each match (for future "line
+  // movement" comparisons) and get back a plain-language description of how
+  // each outcome's price has moved so far, to feed into the prompt as a
+  // timing signal.
+  const movementByGame = await recordSnapshotsAndDescribeMovement(
+    wcData.map((g) => ({
+      gameId: g.gameId,
+      kickoffISO: g.kickoffISO,
+      h2h: g.mlRaw.map((o) => ({ name: normalizeOutcomeName(o.name), price: o.price })),
+    }))
+  );
 
   const hasWCData = wcData.length > 0;
-  const hasGolfData = golfData !== null;
 
-  if (!hasWCData && !hasGolfData && !process.env.ANTHROPIC_API_KEY) {
-    return { worldcup: [], golf: [], generatedAt: new Date().toISOString(), errors: ['API keys not configured yet. See HANDOFF.md for setup instructions.'] };
+  if (!hasWCData && !process.env.ANTHROPIC_API_KEY) {
+    return { worldcup: [], generatedAt: new Date().toISOString(), errors: ['API keys not configured yet. See HANDOFF.md for setup instructions.'] };
   }
 
   if (MOCK_PICKS) {
     return {
       worldcup: buildMockWorldCup(wcData),
-      golf: [],
       generatedAt: new Date().toISOString(),
       errors,
     };
@@ -236,6 +224,8 @@ ${trackRecord.promptText ? `
 IMPORTANT: Here is your own track record on past picks, graded against actual results: ${trackRecord.promptText} Use this only as a light calibration signal — if a market type has been underperforming, lean a little more conservative (e.g. High → Medium) there specifically, and vice versa if it's been hitting well. This is a small sample, so don't let it override what the actual data for a given match tells you, and never mention this track record in the explanation text.
 ` : ''}
 
+IMPORTANT: Each pick also needs a "timing" field — one short sentence (roughly 12-20 words) advising whether to place this bet now or wait, based on the "Moneyline price history" shown for that match. If the price for your picked outcome has been shortening (moving toward less profitable, e.g. -110 → -140, or +150 → +110), say betting now is better since it's likely to keep shortening. If it's been drifting the other way (lengthening, e.g. -140 → -110, or +110 → +180), say it may be worth waiting a bit, since it could keep drifting in the bettor's favor — but note this isn't guaranteed. If there's not enough history yet to see a real trend (the note says "just started tracking" or has only 1-2 data points), say plainly that there isn't enough data yet and betting now vs. waiting doesn't have a clear edge either way. Only reason from the actual price history given — do not invent a trend that isn't shown, and do not confuse this with the "Line divergence" signal, which is a different, unrelated thing.
+
 The explanation is shown in a dedicated detail view. Format it as 3-4 short bullet points, NOT one long paragraph — each bullet starts with "• ". Since this whole response must be valid JSON, separate bullets using the two-character escape sequence \n (backslash followed by the letter n) inside the JSON string — do NOT insert a raw/literal line break. Keep the whole thing tight, roughly 60-90 words total across all bullets combined, but still information-dense — every bullet should carry a real, specific fact, not filler. Cover whichever of these are most relevant to the pick (you don't need all of them every time): what the sportsbook odds imply and whether that's justified; the key form/stats angle (group-stage record, goal difference); a specific tactical/style-of-play matchup detail (pressing, possession, set pieces, how one team's approach exploits the other's weakness); a specific player tendency or player-level detail (a key scorer, playmaker, or defensive liability by name, clearly flagged as general knowledge, not live data); an injury or squad note if relevant (same caveat); historical head-to-head context if it matters. Prefer specific, named details (a player, a tactical trait, a stat) over generic statements like "has a strong squad." Write each bullet as a punchy, specific claim — no throat-clearing, no restating the obvious.
 
 ${hasWCData ? `
@@ -252,21 +242,10 @@ ${g.homeTeam} group-stage record: ${g.homeStats}
 ${g.awayTeam} group-stage record: ${g.awayStats}
 ${g.homeTeam} last 5 results: ${g.homeForm}
 ${g.awayTeam} last 5 results: ${g.awayForm}
+Moneyline price history (oldest to newest, since this app started tracking it — NOT the full pre-game market history): ${movementByGame.get(g.gameId)}
 ${g.lineDivergence.flagged ? `Line divergence: FLAGGED — sportsbooks disagree by ~${g.lineDivergence.maxSpreadPct} points on ${g.lineDivergence.outcome}'s implied probability` : ''}
 `).join('\n')}
 ` : 'No upcoming World Cup matches with posted odds right now.'}
-
-${hasGolfData ? `
-=== ${golfData!.tournament} ===
-Top Odds (Winner Market):
-${golfData!.topOdds.join('\n')}
-
-DataGolf Win Probabilities:
-${golfData!.dgPredictions.join('\n')}
-
-World Rankings:
-${golfData!.rankings.join('\n')}
-` : 'No golf tournament data available.'}
 
 Return a JSON object with this exact structure:
 {
@@ -279,18 +258,9 @@ Return a JSON object with this exact structure:
         "betType": "Spread",
         "odds": "+110",
         "confidence": "High",
-        "explanation": "• Bullet one: a specific fact (e.g. odds/implied probability)\n• Bullet two: another specific fact (e.g. form or stats)\n• Bullet three: tactical, injury, or historical note if relevant"
+        "explanation": "• Bullet one: a specific fact (e.g. odds/implied probability)\n• Bullet two: another specific fact (e.g. form or stats)\n• Bullet three: tactical, injury, or historical note if relevant",
+        "timing": "One short sentence on whether to bet now or wait, based on the price history for this match."
       }
-    }
-  ],
-  "golf": [
-    {
-      "event": "Tournament Name",
-      "pick": "Player Name",
-      "betType": "Tournament Winner",
-      "odds": "+350",
-      "confidence": "Medium",
-      "explanation": "2-3 sentences on why this player has the best realistic chance to win this field"
     }
   ]
 }
@@ -299,7 +269,6 @@ Rules:
 - Every match listed must get exactly one "highestPercent" entry — do not skip any match.
 - Consider all matches listed above, whether they're today or several days out — do not limit yourself to only today's games.
 - Include the match date in "matchTime" (e.g. "Fri, Jul 3 · 3:00 PM ET") so it's clear which day each pick is for.
-- Max 3 golf picks
 - Confidence: High = very likely to win, Medium = probably wins but real risk exists, Low = leaning this way but genuinely uncertain
 - If no upcoming World Cup matches are listed, return an empty array
 - Always return valid JSON only, no other text`;
@@ -344,7 +313,6 @@ Rules:
 
   return {
     worldcup: picks.worldcup ?? [],
-    golf: picks.golf ?? [],
     generatedAt: new Date().toISOString(),
     errors,
   };
@@ -366,7 +334,6 @@ export async function GET() {
   } catch (err) {
     return NextResponse.json({
       worldcup: [],
-      golf: [],
       generatedAt: new Date().toISOString(),
       errors: [`AI analysis failed: ${err instanceof Error ? err.message : 'Unknown error'}`],
     });
