@@ -277,7 +277,7 @@ Rules:
 
   const message = await client.messages.create({
     model: 'claude-sonnet-5',
-    max_tokens: 5000, // two picks per match now instead of one, roughly doubling output size
+    max_tokens: 8000, // two picks per match now instead of one, roughly doubling output size
     messages: [{ role: 'user', content: prompt }],
   });
 
@@ -286,9 +286,18 @@ Rules:
   const textBlock = message.content.find((block) => block.type === 'text');
   const text = textBlock && textBlock.type === 'text' ? textBlock.text : '';
   const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error('No JSON in AI response');
+  if (!jsonMatch) {
+    console.error('No JSON in AI response. stop_reason:', message.stop_reason, 'text:', text.slice(0, 2000));
+    throw new Error('No JSON in AI response');
+  }
 
-  const picks = JSON.parse(sanitizeJsonText(jsonMatch[0]));
+  let picks;
+  try {
+    picks = JSON.parse(sanitizeJsonText(jsonMatch[0]));
+  } catch (err) {
+    console.error('JSON parse failed. stop_reason:', message.stop_reason, 'raw:', jsonMatch[0].slice(0, 3000));
+    throw err;
+  }
   const worldcupPicks: { event: string; highestPercent: { pick: string; betType: string; confidence: 'High' | 'Medium' | 'Low' } }[] = picks.worldcup ?? [];
 
   // Record this run's picks against their real match IDs so they can be
