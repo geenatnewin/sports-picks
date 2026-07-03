@@ -28,11 +28,11 @@ interface RawScoreEntry {
 // from the same cached fetch instead of hitting the API twice. daysFrom=3
 // covers grading stragglers a bit further back than the 1-day window the
 // odds-filtering use case strictly needs.
-async function getScoresSnapshot(): Promise<RawScoreEntry[]> {
+async function getScoresSnapshot(sportKey: string): Promise<RawScoreEntry[]> {
   if (!KEY) return [];
   try {
     const res = await fetch(
-      `${BASE}/sports/soccer_fifa_world_cup/scores/?apiKey=${KEY}&daysFrom=3`,
+      `${BASE}/sports/${sportKey}/scores/?apiKey=${KEY}&daysFrom=3`,
       { next: { revalidate: 300 } }
     );
     if (!res.ok) return [];
@@ -45,8 +45,8 @@ async function getScoresSnapshot(): Promise<RawScoreEntry[]> {
 // The odds endpoint alone can't tell us whether a match that already kicked
 // off is still in play or has finished, so we cross-check against the scores
 // endpoint's `completed` flag.
-async function getCompletedMatchIds(): Promise<Set<string>> {
-  const scores = await getScoresSnapshot();
+async function getCompletedMatchIds(sportKey: string): Promise<Set<string>> {
+  const scores = await getScoresSnapshot(sportKey);
   return new Set(scores.filter((s) => s.completed).map((s) => s.id));
 }
 
@@ -60,8 +60,8 @@ export interface FinishedScore {
 
 // Real final scores for completed matches, used to grade AI picks after the
 // fact — separate from getCompletedMatchIds, which only needs the boolean.
-export async function getFinishedScores(): Promise<FinishedScore[]> {
-  const scores = await getScoresSnapshot();
+async function getFinishedScoresForSport(sportKey: string): Promise<FinishedScore[]> {
+  const scores = await getScoresSnapshot(sportKey);
   const out: FinishedScore[] = [];
   for (const s of scores) {
     if (!s.completed || !s.scores) continue;
@@ -79,7 +79,18 @@ export async function getFinishedScores(): Promise<FinishedScore[]> {
   return out;
 }
 
-export async function getWorldCupOdds(): Promise<OddsGame[]> {
+export function getFinishedScores(): Promise<FinishedScore[]> {
+  return getFinishedScoresForSport('soccer_fifa_world_cup');
+}
+
+export function getMlbFinishedScores(): Promise<FinishedScore[]> {
+  return getFinishedScoresForSport('baseball_mlb');
+}
+
+// MLB runs ~15 games/night league-wide, vs. the World Cup's handful — so its
+// fallback (when there's nothing today) shows every game from the single
+// nearest upcoming day only, never games spanning two different days.
+async function getOddsForSport(sportKey: string, wholeDayFallback = false): Promise<OddsGame[]> {
   if (!KEY) return [];
   try {
     // FanDuel/DraftKings are the priority books, but we also shop a handful
@@ -87,10 +98,10 @@ export async function getWorldCupOdds(): Promise<OddsGame[]> {
     // bookmakers bills as 1 "region" on The Odds API, same cost as just 2.
     const [res, completedIds] = await Promise.all([
       fetch(
-        `${BASE}/sports/soccer_fifa_world_cup/odds?apiKey=${KEY}&bookmakers=fanduel,draftkings,betmgm,williamhill_us,espnbet&markets=h2h,spreads,totals&oddsFormat=american`,
+        `${BASE}/sports/${sportKey}/odds?apiKey=${KEY}&bookmakers=fanduel,draftkings,betmgm,williamhill_us,espnbet&markets=h2h,spreads,totals&oddsFormat=american`,
         { next: { revalidate: 1800 } }
       ),
-      getCompletedMatchIds(),
+      getCompletedMatchIds(sportKey),
     ]);
     if (!res.ok) return [];
     const games: OddsGame[] = await res.json();
@@ -107,12 +118,30 @@ export async function getWorldCupOdds(): Promise<OddsGame[]> {
     const todaysGames = notFinished.filter((g) => nyDateKey(new Date(g.commence_time)) === todayKey);
     if (todaysGames.length > 0) return todaysGames;
 
-    // No games today — show just the single next upcoming game, nothing further out.
     const upcoming = notFinished.filter((g) => new Date(g.commence_time) >= now);
-    return upcoming.length > 0 ? [upcoming[0]] : [];
+    if (upcoming.length === 0) return [];
+
+    if (wholeDayFallback) {
+      // No games today — show every game from the single nearest upcoming
+      // day (all same calendar date), not just one game and not spanning
+      // multiple future days.
+      const nextDayKey = nyDateKey(new Date(upcoming[0].commence_time));
+      return upcoming.filter((g) => nyDateKey(new Date(g.commence_time)) === nextDayKey);
+    }
+
+    // No games today — show just the single next upcoming game, nothing further out.
+    return [upcoming[0]];
   } catch {
     return [];
   }
+}
+
+export function getWorldCupOdds(): Promise<OddsGame[]> {
+  return getOddsForSport('soccer_fifa_world_cup');
+}
+
+export function getMlbOdds(): Promise<OddsGame[]> {
+  return getOddsForSport('baseball_mlb', true);
 }
 
 export function formatAmericanOdds(price: number): string {

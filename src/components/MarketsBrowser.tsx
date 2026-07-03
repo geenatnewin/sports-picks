@@ -170,23 +170,26 @@ export default function MarketsBrowser({
   picks,
   picksLoading,
   aiFailed,
+  sport = 'soccer',
 }: {
   legs: ParlayLeg[];
   onToggle: (leg: ParlayLeg) => void;
   picks: MatchPick[];
   picksLoading: boolean;
   aiFailed: boolean;
+  sport?: 'soccer' | 'mlb';
 }) {
   const [matches, setMatches] = useState<OddsMatch[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [detailPick, setDetailPick] = useState<{ event: string; matchTime: string; label: string; option: PickOption } | null>(null);
 
   useEffect(() => {
-    fetch('/api/odds')
+    setLoading(true);
+    fetch(`/api/odds?sport=${sport}`)
       .then((r) => r.json())
       .then((d) => setMatches(d.matches))
       .finally(() => setLoading(false));
-  }, []);
+  }, [sport]);
 
   const isSelected = (id: string) => legs.some((l) => l.id === id);
   const pickByEvent = new Map(picks.map((p) => [p.event, p]));
@@ -198,7 +201,9 @@ export default function MarketsBrowser({
   if (!matches || matches.length === 0) {
     return (
       <div className="card-elevated rounded-lg p-6 text-center">
-        <p className="text-neutral-500 text-sm">No World Cup markets available right now</p>
+        <p className="text-neutral-500 text-sm">
+          No {sport === 'mlb' ? 'MLB' : 'World Cup'} markets available right now
+        </p>
       </div>
     );
   }

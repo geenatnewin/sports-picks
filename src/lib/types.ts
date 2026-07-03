@@ -15,6 +15,7 @@ export interface MatchPick {
 
 export interface PicksResponse {
   worldcup: MatchPick[];
+  mlb: MatchPick[];
   generatedAt: string;
   errors: string[];
 }

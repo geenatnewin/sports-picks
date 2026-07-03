@@ -24,6 +24,11 @@ export interface PlayerProps {
   twoPlusAssists: string | null;
 }
 
+export interface MlbPlayerProps {
+  homeRuns: string | null;
+  pitcherStrikeouts: string | null;
+}
+
 // Best (lowest/most-favorable) price per player across all bookmakers for a
 // given market, capped to the most credible `limit` candidates — keeps the
 // AI prompt compact instead of listing every player on both rosters.
@@ -45,20 +50,20 @@ function topOutcomes(odds: PropLineOdds, marketKey: string, limit: number): stri
     .join(' | ');
 }
 
-// Fetches anytime-goalscorer and 2+ assists props for whichever World Cup
-// matches are currently being shown, matched to them by team names (PropLine
-// uses its own event IDs, unrelated to The Odds API's). Only pulls two
-// markets, capped to a handful of the most likely candidates each, to keep
-// the AI prompt small — skips PropLine's exotic "scorer assisted by X" combo
-// market and the too-sparse "goal or assist" market as not worth the tokens.
-export async function getWorldCupPlayerProps(
-  matches: { homeTeam: string; awayTeam: string }[]
-): Promise<Map<string, PlayerProps>> {
-  const result = new Map<string, PlayerProps>();
+// Shared by sport-specific wrappers below — fetches PropLine's event list for
+// a sport, matches it to the given matches by team name (PropLine uses its
+// own event IDs, unrelated to The Odds API's), then pulls the requested
+// markets' odds for each matched event.
+async function getPlayerPropsForSport(
+  sportKey: string,
+  matches: { homeTeam: string; awayTeam: string }[],
+  markets: { key: string; limit: number }[]
+): Promise<Map<string, Map<string, string | null>>> {
+  const result = new Map<string, Map<string, string | null>>();
   if (!KEY || matches.length === 0) return result;
 
   try {
-    const res = await fetch(`${BASE}/sports/soccer_fifa_world_cup/events`, {
+    const res = await fetch(`${BASE}/sports/${sportKey}/events`, {
       headers: { 'X-API-Key': KEY },
       next: { revalidate: 1800 },
     });
@@ -72,22 +77,63 @@ export async function getWorldCupPlayerProps(
       );
       if (!event) continue;
 
-      const oddsRes = await fetch(
-        `${BASE}/sports/soccer_fifa_world_cup/events/${event.id}/odds?markets=anytime_goal_scorer,player_2plus_assists`,
-        { headers: { 'X-API-Key': KEY }, next: { revalidate: 1800 } }
-      ).catch(() => null);
+      const marketKeys = markets.map((m) => m.key).join(',');
+      const oddsRes = await fetch(`${BASE}/sports/${sportKey}/events/${event.id}/odds?markets=${marketKeys}`, {
+        headers: { 'X-API-Key': KEY },
+        next: { revalidate: 1800 },
+      }).catch(() => null);
       if (!oddsRes?.ok) continue;
       const odds: PropLineOdds = await oddsRes.json();
 
-      result.set(`${match.homeTeam} vs ${match.awayTeam}`, {
-        anytimeScorers: topOutcomes(odds, 'anytime_goal_scorer', 5),
-        twoPlusAssists: topOutcomes(odds, 'player_2plus_assists', 3),
-      });
+      const byMarket = new Map<string, string | null>();
+      for (const m of markets) byMarket.set(m.key, topOutcomes(odds, m.key, m.limit));
+      result.set(`${match.homeTeam} vs ${match.awayTeam}`, byMarket);
     }
   } catch {
     // Player props are a nice-to-have addition — fail quietly and let picks
     // generation continue on match-level markets only.
   }
 
+  return result;
+}
+
+// Fetches anytime-goalscorer and 2+ assists props for whichever World Cup
+// matches are currently being shown. Only pulls two markets, capped to a
+// handful of the most likely candidates each, to keep the AI prompt small —
+// skips PropLine's exotic "scorer assisted by X" combo market and the
+// too-sparse "goal or assist" market as not worth the tokens.
+export async function getWorldCupPlayerProps(
+  matches: { homeTeam: string; awayTeam: string }[]
+): Promise<Map<string, PlayerProps>> {
+  const raw = await getPlayerPropsForSport('soccer_fifa_world_cup', matches, [
+    { key: 'anytime_goal_scorer', limit: 5 },
+    { key: 'player_2plus_assists', limit: 3 },
+  ]);
+  const result = new Map<string, PlayerProps>();
+  for (const [event, byMarket] of raw) {
+    result.set(event, {
+      anytimeScorers: byMarket.get('anytime_goal_scorer') ?? null,
+      twoPlusAssists: byMarket.get('player_2plus_assists') ?? null,
+    });
+  }
+  return result;
+}
+
+// Same pattern for MLB: anytime home run and (starting) pitcher strikeouts —
+// the two most standard MLB player props, same "cap it small" approach.
+export async function getMlbPlayerProps(
+  matches: { homeTeam: string; awayTeam: string }[]
+): Promise<Map<string, MlbPlayerProps>> {
+  const raw = await getPlayerPropsForSport('baseball_mlb', matches, [
+    { key: 'batter_home_runs', limit: 5 },
+    { key: 'pitcher_strikeouts', limit: 4 },
+  ]);
+  const result = new Map<string, MlbPlayerProps>();
+  for (const [event, byMarket] of raw) {
+    result.set(event, {
+      homeRuns: byMarket.get('batter_home_runs') ?? null,
+      pitcherStrikeouts: byMarket.get('pitcher_strikeouts') ?? null,
+    });
+  }
   return result;
 }

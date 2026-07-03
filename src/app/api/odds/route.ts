@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server';
-import { getWorldCupOdds, getBestLine, getLineDivergence, formatAmericanOdds, normalizeOutcomeName } from '@/lib/odds';
-import { getMatchRecentForm } from '@/lib/soccer';
+import { getWorldCupOdds, getMlbOdds, getBestLine, getLineDivergence, formatAmericanOdds, normalizeOutcomeName } from '@/lib/odds';
+import { getMatchRecentForm as getSoccerMatchRecentForm } from '@/lib/soccer';
+import { getMatchRecentForm as getMlbMatchRecentForm } from '@/lib/baseball';
 
-const MARKET_LABELS: Record<string, string> = {
-  h2h: 'Moneyline',
-  spreads: 'Spread',
-  totals: 'Total Goals',
+const MARKET_LABELS: Record<'soccer' | 'mlb', Record<string, string>> = {
+  soccer: { h2h: 'Moneyline', spreads: 'Spread', totals: 'Total Goals' },
+  mlb: { h2h: 'Moneyline', spreads: 'Spread', totals: 'Total Runs' },
 };
 
 function outcomeLabel(marketKey: string, name: string, point?: number): string {
@@ -19,18 +19,23 @@ function outcomeLabel(marketKey: string, name: string, point?: number): string {
   return label;
 }
 
-export async function GET() {
-  const games = await getWorldCupOdds();
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const sport = searchParams.get('sport') === 'mlb' ? 'mlb' : 'soccer';
+
+  const games = sport === 'mlb' ? await getMlbOdds() : await getWorldCupOdds();
+  const getForm = sport === 'mlb' ? getMlbMatchRecentForm : getSoccerMatchRecentForm;
+  const marketLabels = MARKET_LABELS[sport];
 
   const matches = await Promise.all(
     games.map(async (game) => {
-      const markets = Object.keys(MARKET_LABELS)
+      const markets = Object.keys(marketLabels)
         .map((marketKey) => {
           const outcomes = getBestLine(game, marketKey);
           if (!outcomes) return null;
           return {
             key: marketKey,
-            label: MARKET_LABELS[marketKey],
+            label: marketLabels[marketKey],
             outcomes: outcomes.map((o) => ({
               id: `${game.id}-${marketKey}-${o.name}-${o.point ?? ''}`,
               label: outcomeLabel(marketKey, o.name, o.point),
@@ -41,7 +46,7 @@ export async function GET() {
         })
         .filter((m): m is NonNullable<typeof m> => m !== null);
 
-      const { homeForm, awayForm } = await getMatchRecentForm(game.home_team, game.away_team).catch(() => ({
+      const { homeForm, awayForm } = await getForm(game.home_team, game.away_team).catch(() => ({
         homeForm: null,
         awayForm: null,
       }));

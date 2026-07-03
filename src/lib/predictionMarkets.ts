@@ -45,28 +45,29 @@ async function fetchPolymarket(homeTeam: string, awayTeam: string): Promise<Mark
   }
 }
 
-let kalshiEventsCache: { data: { event_ticker: string; title: string }[]; expiresAt: number } | null = null;
+const kalshiEventsCache = new Map<string, { data: { event_ticker: string; title: string }[]; expiresAt: number }>();
 
-async function getKalshiWorldCupEvents(): Promise<{ event_ticker: string; title: string }[]> {
-  if (kalshiEventsCache && kalshiEventsCache.expiresAt > Date.now()) return kalshiEventsCache.data;
+async function getKalshiEvents(seriesTicker: string): Promise<{ event_ticker: string; title: string }[]> {
+  const cached = kalshiEventsCache.get(seriesTicker);
+  if (cached && cached.expiresAt > Date.now()) return cached.data;
   try {
     const res = await fetch(
-      'https://api.elections.kalshi.com/trade-api/v2/events?series_ticker=KXWCGAME&status=open&limit=200',
+      `https://api.elections.kalshi.com/trade-api/v2/events?series_ticker=${seriesTicker}&status=open&limit=200`,
       { next: { revalidate: 900 } }
     );
     if (!res.ok) return [];
     const data = await res.json();
     const events = data.events ?? [];
-    kalshiEventsCache = { data: events, expiresAt: Date.now() + 15 * 60 * 1000 };
+    kalshiEventsCache.set(seriesTicker, { data: events, expiresAt: Date.now() + 15 * 60 * 1000 });
     return events;
   } catch {
     return [];
   }
 }
 
-async function fetchKalshi(homeTeam: string, awayTeam: string): Promise<MarketOutcome[] | null> {
+async function fetchKalshi(homeTeam: string, awayTeam: string, seriesTicker: string): Promise<MarketOutcome[] | null> {
   try {
-    const events = await getKalshiWorldCupEvents();
+    const events = await getKalshiEvents(seriesTicker);
     const event = events.find((e) => matchesTeams(e.title, homeTeam, awayTeam));
     if (!event) return null;
 
@@ -91,10 +92,14 @@ async function fetchKalshi(homeTeam: string, awayTeam: string): Promise<MarketOu
   }
 }
 
-export async function getPredictionMarkets(homeTeam: string, awayTeam: string): Promise<MatchPredictionMarkets> {
+export async function getPredictionMarkets(
+  homeTeam: string,
+  awayTeam: string,
+  kalshiSeriesTicker: string = 'KXWCGAME'
+): Promise<MatchPredictionMarkets> {
   const [polymarket, kalshi] = await Promise.all([
     fetchPolymarket(homeTeam, awayTeam),
-    fetchKalshi(homeTeam, awayTeam),
+    fetchKalshi(homeTeam, awayTeam, kalshiSeriesTicker),
   ]);
   return { polymarket, kalshi };
 }
