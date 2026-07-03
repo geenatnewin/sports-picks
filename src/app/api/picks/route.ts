@@ -1,10 +1,11 @@
 import { NextResponse } from 'next/server';
 import { unstable_cache } from 'next/cache';
 import Anthropic from '@anthropic-ai/sdk';
-import { getWorldCupOdds, getGolfOdds, getBestLine, getLineDivergence, formatAmericanOdds, normalizeOutcomeName } from '@/lib/odds';
+import { getWorldCupOdds, getGolfOdds, getBestLine, getLineDivergence, getFinishedScores, formatAmericanOdds, normalizeOutcomeName } from '@/lib/odds';
 import { getWorldCupStandings, getTeamRecentForm, summarizeRecentForm } from '@/lib/soccer';
 import { getTournamentPredictions, getGolfRankings } from '@/lib/golf';
 import { getPredictionMarkets } from '@/lib/predictionMarkets';
+import { gradeAndSummarize, recordPicks } from '@/lib/pickHistory';
 import { PicksResponse } from '@/lib/types';
 
 // Cache the generated picks for 20 minutes — repeated Refresh presses or page
@@ -108,13 +109,20 @@ async function generatePicks(): Promise<PicksResponse> {
   const errors: string[] = [];
 
   // Fetch all data in parallel
-  const [wcOdds, wcStandings, golfOdds, golfPreds, golfRankings] = await Promise.all([
+  const [wcOdds, wcStandings, golfOdds, golfPreds, golfRankings, finishedScores] = await Promise.all([
     getWorldCupOdds().catch(() => { errors.push('World Cup odds unavailable'); return []; }),
     getWorldCupStandings().catch(() => { errors.push('World Cup standings unavailable'); return null; }),
     INCLUDE_GOLF ? getGolfOdds().catch(() => { errors.push('Golf odds unavailable'); return null; }) : Promise.resolve(null),
     INCLUDE_GOLF ? getTournamentPredictions().catch(() => { errors.push('Golf predictions unavailable'); return null; }) : Promise.resolve(null),
     INCLUDE_GOLF ? getGolfRankings().catch(() => { errors.push('Golf rankings unavailable'); return null; }) : Promise.resolve(null),
+    getFinishedScores().catch(() => []),
   ]);
+
+  // Grade any previously-recorded picks whose matches have since finished
+  // against real final scores, so the AI can see how its own past picks
+  // have performed. New picks from this run are recorded further below,
+  // once the AI response is available.
+  const { history: pickHistory, summary: trackRecord } = await gradeAndSummarize(finishedScores);
 
   // Flatten group standings into one lookup table
   const standingsRows: StandingsRow[] = (wcStandings?.standings ?? []).flatMap(
@@ -146,8 +154,10 @@ async function generatePicks(): Promise<PicksResponse> {
         outcomes ? outcomes.map((o) => `${o.label}: ${o.probability}%`).join(' | ') : null;
 
       return {
+        gameId: game.id,
         homeTeam: game.home_team,
         awayTeam: game.away_team,
+        kickoffISO: game.commence_time,
         kickoff: new Date(game.commence_time).toLocaleString('en-US', {
           timeZone: 'America/New_York',
           weekday: 'short',
@@ -222,6 +232,9 @@ IMPORTANT: Refer to a tied-match outcome as "Tie", never "Draw", in both the pic
 IMPORTANT: Some matches include a "Line divergence" note — how widely sportsbooks disagree with each other on the same outcome's implied win probability. This is a soft market-uncertainty signal only, not a real fixing-detection tool (that requires account-level betting data no public odds API provides). It does NOT indicate which side is more likely to win. Never claim, imply, or speculate that a match is fixed, manipulated, or rigged. When a match is flagged, the only appropriate uses are: (1) treat it as a reason to be more conservative — e.g. drop confidence from High to Medium — and (2) optionally add one brief, neutrally-worded bullet like "sportsbooks disagree more than usual on this line" if genuinely relevant. Do not speculate about why.
 
 IMPORTANT: Do NOT mention, cite, or name-drop "Kalshi", "Polymarket", "prediction markets", or their specific prices anywhere in the explanation text. Use that data silently to inform your pick and confidence — the explanation should read as your own analysis, sourced from odds, stats, and football knowledge only. If you're relying on general knowledge rather than the sportsbook/stats data provided (e.g. injury news), say so plainly rather than stating it as verified fact — you do not have a live injury feed.
+${trackRecord.promptText ? `
+IMPORTANT: Here is your own track record on past picks, graded against actual results: ${trackRecord.promptText} Use this only as a light calibration signal — if a market type has been underperforming, lean a little more conservative (e.g. High → Medium) there specifically, and vice versa if it's been hitting well. This is a small sample, so don't let it override what the actual data for a given match tells you, and never mention this track record in the explanation text.
+` : ''}
 
 The explanation is shown in a dedicated detail view. Format it as 3-4 short bullet points, NOT one long paragraph — each bullet starts with "• ". Since this whole response must be valid JSON, separate bullets using the two-character escape sequence \n (backslash followed by the letter n) inside the JSON string — do NOT insert a raw/literal line break. Keep the whole thing tight, roughly 60-90 words total across all bullets combined, but still information-dense — every bullet should carry a real, specific fact, not filler. Cover whichever of these are most relevant to the pick (you don't need all of them every time): what the sportsbook odds imply and whether that's justified; the key form/stats angle (group-stage record, goal difference); a specific tactical/style-of-play matchup detail (pressing, possession, set pieces, how one team's approach exploits the other's weakness); a specific player tendency or player-level detail (a key scorer, playmaker, or defensive liability by name, clearly flagged as general knowledge, not live data); an injury or squad note if relevant (same caveat); historical head-to-head context if it matters. Prefer specific, named details (a player, a tactical trait, a stat) over generic statements like "has a strong squad." Write each bullet as a punchy, specific claim — no throat-clearing, no restating the obvious.
 
@@ -305,6 +318,29 @@ Rules:
   if (!jsonMatch) throw new Error('No JSON in AI response');
 
   const picks = JSON.parse(sanitizeJsonText(jsonMatch[0]));
+  const worldcupPicks: { event: string; highestPercent: { pick: string; betType: string; confidence: 'High' | 'Medium' | 'Low' } }[] = picks.worldcup ?? [];
+
+  // Record this run's picks against their real match IDs so they can be
+  // graded once the games finish — matched back to wcData by event string,
+  // the same "Team A vs Team B" key the AI is asked to echo back.
+  const wcByEvent = new Map(wcData.map((g) => [`${g.homeTeam} vs ${g.awayTeam}`, g]));
+  const newPickInputs = worldcupPicks
+    .map((p) => {
+      const game = wcByEvent.get(p.event);
+      if (!game) return null;
+      return {
+        gameId: game.gameId,
+        event: p.event,
+        homeTeam: game.homeTeam,
+        awayTeam: game.awayTeam,
+        kickoff: game.kickoffISO,
+        betType: p.highestPercent.betType,
+        pick: p.highestPercent.pick,
+        confidence: p.highestPercent.confidence,
+      };
+    })
+    .filter((p): p is NonNullable<typeof p> => p !== null);
+  await recordPicks(pickHistory, newPickInputs).catch(() => {});
 
   return {
     worldcup: picks.worldcup ?? [],

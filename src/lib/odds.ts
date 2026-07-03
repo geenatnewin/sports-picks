@@ -15,23 +15,68 @@ function nyDateKey(date: Date): string {
   }).format(date);
 }
 
-// The odds endpoint alone can't tell us whether a match that already kicked
-// off is still in play or has finished, so we cross-check against the scores
-// endpoint's `completed` flag (covers the last day, which comfortably covers
-// a match plus stoppage/extra time).
-async function getCompletedMatchIds(): Promise<Set<string>> {
-  if (!KEY) return new Set();
+interface RawScoreEntry {
+  id: string;
+  completed: boolean;
+  home_team: string;
+  away_team: string;
+  scores: { name: string; score: string }[] | null;
+}
+
+// Shared by getCompletedMatchIds (drops finished matches from the odds list)
+// and getFinishedScores (grades AI picks against real results) so both pull
+// from the same cached fetch instead of hitting the API twice. daysFrom=3
+// covers grading stragglers a bit further back than the 1-day window the
+// odds-filtering use case strictly needs.
+async function getScoresSnapshot(): Promise<RawScoreEntry[]> {
+  if (!KEY) return [];
   try {
     const res = await fetch(
-      `${BASE}/sports/soccer_fifa_world_cup/scores/?apiKey=${KEY}&daysFrom=1`,
+      `${BASE}/sports/soccer_fifa_world_cup/scores/?apiKey=${KEY}&daysFrom=3`,
       { next: { revalidate: 300 } }
     );
-    if (!res.ok) return new Set();
-    const scores: { id: string; completed: boolean }[] = await res.json();
-    return new Set(scores.filter((s) => s.completed).map((s) => s.id));
+    if (!res.ok) return [];
+    return await res.json();
   } catch {
-    return new Set();
+    return [];
   }
+}
+
+// The odds endpoint alone can't tell us whether a match that already kicked
+// off is still in play or has finished, so we cross-check against the scores
+// endpoint's `completed` flag.
+async function getCompletedMatchIds(): Promise<Set<string>> {
+  const scores = await getScoresSnapshot();
+  return new Set(scores.filter((s) => s.completed).map((s) => s.id));
+}
+
+export interface FinishedScore {
+  gameId: string;
+  homeTeam: string;
+  awayTeam: string;
+  homeScore: number;
+  awayScore: number;
+}
+
+// Real final scores for completed matches, used to grade AI picks after the
+// fact — separate from getCompletedMatchIds, which only needs the boolean.
+export async function getFinishedScores(): Promise<FinishedScore[]> {
+  const scores = await getScoresSnapshot();
+  const out: FinishedScore[] = [];
+  for (const s of scores) {
+    if (!s.completed || !s.scores) continue;
+    const home = s.scores.find((sc) => sc.name === s.home_team);
+    const away = s.scores.find((sc) => sc.name === s.away_team);
+    if (!home || !away) continue;
+    out.push({
+      gameId: s.id,
+      homeTeam: s.home_team,
+      awayTeam: s.away_team,
+      homeScore: parseInt(home.score, 10),
+      awayScore: parseInt(away.score, 10),
+    });
+  }
+  return out;
 }
 
 export async function getWorldCupOdds(): Promise<OddsGame[]> {
