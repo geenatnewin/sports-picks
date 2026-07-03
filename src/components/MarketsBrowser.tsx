@@ -24,6 +24,12 @@ interface FormResult {
   opponent: string;
 }
 
+interface LineDivergence {
+  flagged: boolean;
+  maxSpreadPct: number;
+  outcome: string | null;
+}
+
 interface OddsMatch {
   gameId: string;
   event: string;
@@ -32,6 +38,7 @@ interface OddsMatch {
   homeForm: FormResult[] | null;
   awayForm: FormResult[] | null;
   isLive: boolean;
+  lineDivergence: LineDivergence;
   matchTime: string;
   markets: OddsMarket[];
 }
@@ -207,6 +214,16 @@ export default function MarketsBrowser({
                 )}
                 {match.matchTime}
               </p>
+
+              {match.lineDivergence?.flagged && (
+                <p
+                  className="inline-flex items-center gap-1.5 text-amber-400 text-xs mb-4 -mt-2"
+                  title={`Sportsbooks disagree by ~${match.lineDivergence.maxSpreadPct} points on the implied probability of ${match.lineDivergence.outcome}. Not proof of anything — just wider than usual.`}
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+                  Unusual line movement — books disagree more than usual on this one
+                </p>
+              )}
 
               {(match.homeForm || match.awayForm) && (
                 <div className="space-y-3 mb-5 pb-5 border-b border-white/[0.06]">

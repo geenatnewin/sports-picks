@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { unstable_cache } from 'next/cache';
 import Anthropic from '@anthropic-ai/sdk';
-import { getWorldCupOdds, getGolfOdds, getBestLine, formatAmericanOdds, normalizeOutcomeName } from '@/lib/odds';
+import { getWorldCupOdds, getGolfOdds, getBestLine, getLineDivergence, formatAmericanOdds, normalizeOutcomeName } from '@/lib/odds';
 import { getWorldCupStandings, getTeamRecentForm, summarizeRecentForm } from '@/lib/soccer';
 import { getTournamentPredictions, getGolfRankings } from '@/lib/golf';
 import { getPredictionMarkets } from '@/lib/predictionMarkets';
@@ -127,6 +127,7 @@ async function generatePicks(): Promise<PicksResponse> {
       const ml = getBestLine(game, 'h2h');
       const spread = getBestLine(game, 'spreads');
       const totals = getBestLine(game, 'totals');
+      const lineDivergence = getLineDivergence(game, 'h2h');
       const markets = await getPredictionMarkets(game.home_team, game.away_team).catch(() => ({
         polymarket: null,
         kalshi: null,
@@ -171,6 +172,7 @@ async function generatePicks(): Promise<PicksResponse> {
         awayForm: awayForm ?? 'No recent match history',
         polymarket: formatMarket(markets.polymarket),
         kalshi: formatMarket(markets.kalshi),
+        lineDivergence,
       };
     })
   );
@@ -217,6 +219,8 @@ IMPORTANT: Do not treat two teams' records as equivalent just because the win/lo
 
 IMPORTANT: Refer to a tied-match outcome as "Tie", never "Draw", in both the pick and the explanation.
 
+IMPORTANT: Some matches include a "Line divergence" note — how widely sportsbooks disagree with each other on the same outcome's implied win probability. This is a soft market-uncertainty signal only, not a real fixing-detection tool (that requires account-level betting data no public odds API provides). It does NOT indicate which side is more likely to win. Never claim, imply, or speculate that a match is fixed, manipulated, or rigged. When a match is flagged, the only appropriate uses are: (1) treat it as a reason to be more conservative — e.g. drop confidence from High to Medium — and (2) optionally add one brief, neutrally-worded bullet like "sportsbooks disagree more than usual on this line" if genuinely relevant. Do not speculate about why.
+
 IMPORTANT: Do NOT mention, cite, or name-drop "Kalshi", "Polymarket", "prediction markets", or their specific prices anywhere in the explanation text. Use that data silently to inform your pick and confidence — the explanation should read as your own analysis, sourced from odds, stats, and football knowledge only. If you're relying on general knowledge rather than the sportsbook/stats data provided (e.g. injury news), say so plainly rather than stating it as verified fact — you do not have a live injury feed.
 
 The explanation is shown in a dedicated detail view. Format it as 3-4 short bullet points, NOT one long paragraph — each bullet starts with "• ". Since this whole response must be valid JSON, separate bullets using the two-character escape sequence \n (backslash followed by the letter n) inside the JSON string — do NOT insert a raw/literal line break. Keep the whole thing tight, roughly 60-90 words total across all bullets combined, but still information-dense — every bullet should carry a real, specific fact, not filler. Cover whichever of these are most relevant to the pick (you don't need all of them every time): what the sportsbook odds imply and whether that's justified; the key form/stats angle (group-stage record, goal difference); a specific tactical/style-of-play matchup detail (pressing, possession, set pieces, how one team's approach exploits the other's weakness); a specific player tendency or player-level detail (a key scorer, playmaker, or defensive liability by name, clearly flagged as general knowledge, not live data); an injury or squad note if relevant (same caveat); historical head-to-head context if it matters. Prefer specific, named details (a player, a tactical trait, a stat) over generic statements like "has a strong squad." Write each bullet as a punchy, specific claim — no throat-clearing, no restating the obvious.
@@ -235,6 +239,7 @@ ${g.homeTeam} group-stage record: ${g.homeStats}
 ${g.awayTeam} group-stage record: ${g.awayStats}
 ${g.homeTeam} last 5 results: ${g.homeForm}
 ${g.awayTeam} last 5 results: ${g.awayForm}
+${g.lineDivergence.flagged ? `Line divergence: FLAGGED — sportsbooks disagree by ~${g.lineDivergence.maxSpreadPct} points on ${g.lineDivergence.outcome}'s implied probability` : ''}
 `).join('\n')}
 ` : 'No upcoming World Cup matches with posted odds right now.'}
 

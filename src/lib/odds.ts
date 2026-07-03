@@ -105,6 +105,66 @@ export function normalizeOutcomeName(name: string): string {
   return name === 'Draw' ? 'Tie' : name;
 }
 
+function impliedProbabilityPct(price: number): number {
+  return price > 0 ? (100 / (price + 100)) * 100 : (-price / (-price + 100)) * 100;
+}
+
+// A 2-book "wide spread" is just noise — only treat this as a signal once
+// enough books are quoting the same outcome to make disagreement meaningful.
+const MIN_BOOKS_FOR_DIVERGENCE_SIGNAL = 3;
+// Major-market moneyline books normally cluster within a few points of each
+// other's implied probability on the same outcome. A double-digit spread is
+// unusual enough to be worth flagging as a soft "line looks off" signal —
+// NOT proof of anything on its own (see integrity-monitoring services for
+// what actual fixing detection requires: account-level betting data this
+// app has no access to).
+const DIVERGENCE_THRESHOLD_PCT = 12;
+
+export interface LineDivergence {
+  flagged: boolean;
+  maxSpreadPct: number;
+  outcome: string | null;
+}
+
+// Flags matches where bookmakers disagree unusually widely on the same
+// outcome's implied win probability. This is one of the cheap, DIY signals
+// real integrity-monitoring firms also watch for (alongside things this app
+// can't see, like account-level bet volume) — a soft "something's off here"
+// flag, not a claim about which side is favored or whether anything is fixed.
+export function getLineDivergence(game: OddsGame, marketKey: string): LineDivergence {
+  const pricesByOutcome = new Map<string, number[]>();
+
+  for (const book of game.bookmakers) {
+    const market = book.markets.find((m) => m.key === marketKey);
+    if (!market) continue;
+    for (const outcome of market.outcomes) {
+      const key = `${outcome.name}|${outcome.point ?? ''}`;
+      const list = pricesByOutcome.get(key) ?? [];
+      list.push(outcome.price);
+      pricesByOutcome.set(key, list);
+    }
+  }
+
+  let maxSpreadPct = 0;
+  let worstOutcome: string | null = null;
+
+  for (const [key, prices] of pricesByOutcome) {
+    if (prices.length < MIN_BOOKS_FOR_DIVERGENCE_SIGNAL) continue;
+    const probs = prices.map(impliedProbabilityPct);
+    const spread = Math.max(...probs) - Math.min(...probs);
+    if (spread > maxSpreadPct) {
+      maxSpreadPct = spread;
+      worstOutcome = key.split('|')[0];
+    }
+  }
+
+  return {
+    flagged: maxSpreadPct >= DIVERGENCE_THRESHOLD_PCT,
+    maxSpreadPct: Math.round(maxSpreadPct * 10) / 10,
+    outcome: worstOutcome ? normalizeOutcomeName(worstOutcome) : null,
+  };
+}
+
 // Shop across every bookmaker for the best (most favorable to the bettor)
 // price on each outcome — a higher price is always better, whether it's
 // positive (+150 beats +120) or negative (-110 beats -150).

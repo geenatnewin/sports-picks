@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getWorldCupOdds, getBestLine, formatAmericanOdds, normalizeOutcomeName } from '@/lib/odds';
+import { getWorldCupOdds, getBestLine, getLineDivergence, formatAmericanOdds, normalizeOutcomeName } from '@/lib/odds';
 import { getMatchRecentForm } from '@/lib/soccer';
 
 const MARKET_LABELS: Record<string, string> = {
@@ -54,6 +54,7 @@ export async function GET() {
         homeForm,
         awayForm,
         isLive: new Date(game.commence_time) < new Date(),
+        lineDivergence: getLineDivergence(game, 'h2h'),
         matchTime: new Date(game.commence_time).toLocaleString('en-US', {
           timeZone: 'America/New_York',
           weekday: 'short',
