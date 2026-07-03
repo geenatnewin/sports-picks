@@ -4,7 +4,7 @@ export interface PickOption {
   odds: string;
   confidence: 'High' | 'Medium' | 'Low';
   explanation: string;
-  timing: string;
+  counterpoint: string;
 }
 
 export interface MatchPick {
