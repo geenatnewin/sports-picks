@@ -1,6 +1,6 @@
 # Dylan Harper's "Trust Me" Locks — Handoff
 
-**Last updated:** July 2, 2026
+**Last updated:** July 3, 2026 (early morning)
 **Project location:** `C:\Users\Navin\Desktop\sports-picks`
 **Live site:** https://dylanharperpicks.vercel.app
 **GitHub:** https://github.com/geenatnewin/sports-picks (connected to Vercel — push to `main` auto-deploys)
@@ -21,7 +21,7 @@ Branding: displayed name is **"Dylan Harper's 'Trust Me' Locks"**. The codebase/
 
 **Caching:** the 20-minute picks cache was rebuilt on `unstable_cache` (Next's persistent Data Cache) instead of a plain in-memory variable, because the in-memory version reset on every cold serverless instance and was silently re-billing Anthropic far more than intended. Errors are not cached, so a failed AI call retries fresh next time instead of getting stuck.
 
-**As observed live on July 2, 2026:** the World Cup section shows **"0 upcoming picks."** This is expected behavior, not a bug — the match-date filter only shows today's matches, or if none today, the single next upcoming match; there's apparently a gap in the tournament schedule right now. Worth a quick sanity check next session that this flips back on once matches resume. The "My Picks" panel correctly shows its empty state ("No slips placed yet").
+**Fixed:** matches used to disappear from the app the instant kickoff passed, which is why the site was showing "0 upcoming picks" during schedule gaps even when a match was actually being played. `getWorldCupOdds()` now cross-checks The Odds API's scores endpoint (`completed` flag) and only drops matches confirmed finished — in-play matches stay visible with a pulsing **LIVE** badge. **Verified live as of July 3, 2026 ~03:02 UTC:** `/api/odds` correctly returned a live match (Switzerland vs Algeria, kicked off 11:00 PM, `isLive: true`) instead of showing nothing.
 
 ---
 
@@ -70,11 +70,11 @@ src/
 ## Deployment notes (important)
 
 - **Vercel project name:** `dylanharperpicks` (renamed from `sports-picks`)
-- **Alias does NOT auto-update.** After every `vercel --prod` deploy, run:
+- **Alias does NOT auto-update — confirmed this also applies to git-push auto-deploys, not just manual `vercel --prod`.** On July 3, two pushes to `main` (`d06dc34`, `633d668`) built and went Ready in Vercel but `dylanharperpicks.vercel.app` stayed pinned to a build from 20+ hours earlier — the site was silently serving old code the whole time. After every deploy (git push OR manual), run:
   ```
   vercel alias set <new-deployment-url> dylanharperpicks.vercel.app
   ```
-  Otherwise the live URL keeps serving the old build.
+  Check with `vercel inspect dylanharperpicks.vercel.app` if unsure what's actually live. Consider this the default suspect any time the live site doesn't reflect a recent commit.
 - **SSO/deployment protection** was accidentally on for a while previously, silently gating every new deployment behind a Vercel login wall. Disabled via `vercel project protection disable dylanharperpicks --sso`. If the live site ever starts redirecting to a Vercel login page again, that setting is the first thing to check.
 - Production env vars currently set: `ODDS_API_KEY`, `FOOTBALL_DATA_API_KEY`, `DATAGOLF_API_KEY` (placeholder), **`ANTHROPIC_API_KEY` (now set — real AI picks are live)**.
 
@@ -82,7 +82,6 @@ src/
 
 ## What's left to do
 
-- [ ] Confirm picks repopulate once the World Cup schedule has a match today/next-up again (site currently shows "0 upcoming picks" — expected given the schedule gap, but worth eyeballing)
 - [ ] Build out "Player Props" tab (currently just a "coming soon" placeholder)
 - [ ] Consider adding other sports (NBA discussed but not started — would need a new stats source since football-data.org is soccer-only)
 - [ ] Golf is fully built but switched off (`INCLUDE_GOLF = false`) — flip on if wanted, no other work needed
@@ -117,3 +116,9 @@ src/
 - Extracted a shared `getMatchRecentForm()` helper so the same last-5-results data is also shown visibly on each Game Props match card (result, score, opponent)
 - Renamed "Draw" to "Tie" throughout (odds display, AI prompt, mock picks) and standardized recent-form results to show T instead of D
 - Made Game Props boxes bigger (padding/text/spacing) for readability
+
+### Session 4 — July 2-3, 2026 (user forgot to end session again — covers one more unlogged commit plus this session's live-site check)
+- **Unlogged commit from prior session** (`633d668`): fixed the root cause of "0 upcoming picks" — matches were being dropped from the list the instant kickoff time passed, even if still being played. `getWorldCupOdds()` in `src/lib/odds.ts` now cross-checks The Odds API's scores endpoint (`completed` flag, `daysFrom=1`) and only removes matches confirmed finished; added a pulsing red **LIVE** badge in `MarketsBrowser.tsx` for in-play matches, and dropped "upcoming" from the section-count copy since counts can now include live matches too
+- This session: checked the live site and found `dylanharperpicks.vercel.app` was still serving a build from 20+ hours ago — two git-push auto-deploys (`d06dc34`, `633d668`) had gone Ready in Vercel but the production alias never moved. Confirmed this isn't limited to manual `vercel --prod` deploys as previously documented; ran `vercel alias set` to point the domain at the latest deployment and re-verified `/api/odds` and `/api/picks` live
+- Verified the LIVE-match fix works in production: `/api/odds` correctly showed a live match (Switzerland vs Algeria, `isLive: true`) instead of an empty list
+- Noted (not a bug, self-corrects): right after the realias, `/api/picks` briefly still returned a cached pick for a different, non-live match — the 20-minute `unstable_cache` TTL isn't keyed to deployment/code version, so a pick generated just before a deploy can stay stale for up to 20 minutes after. Not worth engineering around, just worth knowing if a spot-check right after a deploy looks momentarily out of sync with `/api/odds`
