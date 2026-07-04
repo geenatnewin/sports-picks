@@ -13,10 +13,11 @@ import { getWorldCupStandings, getTeamRecentForm, summarizeRecentForm } from '@/
 import { getPredictionMarkets } from '@/lib/predictionMarkets';
 import { getWorldCupPlayerProps } from '@/lib/propline';
 import { gradeAndSummarize, recordPicks } from '@/lib/pickHistory';
-import { MatchPick, PicksResponse } from '@/lib/types';
+import { AiParlay, MatchPick } from '@/lib/types';
 
 interface SportPicksResult {
   matches: MatchPick[];
+  parlay: AiParlay | null;
   errors: string[];
 }
 
@@ -118,6 +119,23 @@ function buildMockWorldCup(data: { homeTeam: string; awayTeam: string; kickoff: 
   });
 }
 
+function buildMockParlay(data: { homeTeam: string; awayTeam: string; mlRaw: { name: string; price: number }[] }[]): AiParlay | null {
+  if (data.length < 3) return null;
+  const legCount = data.length >= 4 ? 4 : 3;
+  const legs = data.slice(0, legCount).map((g) => {
+    const sorted = [...g.mlRaw].sort((a, b) => a.price - b.price); // most negative (favorite) first
+    const favorite = sorted[0];
+    return {
+      event: `${g.homeTeam} vs ${g.awayTeam}`,
+      pick: favorite ? normalizeOutcomeName(favorite.name) : g.homeTeam,
+      betType: 'Moneyline',
+      odds: favorite ? formatAmericanOdds(favorite.price) : 'N/A',
+      reason: '[Preview] Placeholder leg using real odds — not real analysis yet.',
+    };
+  });
+  return { legs, summary: '[Preview] Placeholder parlay combining favorites — not real analysis yet.' };
+}
+
 async function generatePicks(): Promise<SportPicksResult> {
   const errors: string[] = [];
 
@@ -217,11 +235,11 @@ async function generatePicks(): Promise<SportPicksResult> {
   const hasWCData = wcData.length > 0;
 
   if (!hasWCData && !process.env.ANTHROPIC_API_KEY) {
-    return { matches: [], errors: ['API keys not configured yet. See HANDOFF.md for setup instructions.'] };
+    return { matches: [], parlay: null, errors: ['API keys not configured yet. See HANDOFF.md for setup instructions.'] };
   }
 
   if (MOCK_PICKS) {
-    return { matches: buildMockWorldCup(wcData), errors };
+    return { matches: buildMockWorldCup(wcData), parlay: buildMockParlay(wcData), errors };
   }
 
   // Build AI prompt
@@ -253,6 +271,16 @@ IMPORTANT: Here is your own track record on past picks, graded against actual re
 IMPORTANT: Each pick may have a "counterpoint" field — one short sentence giving the single best, most credible real reason this specific pick might NOT hit, grounded in the actual data/knowledge above (a stat, a tactical matchup, a specific player, recent form, historical head-to-head). Play devil's advocate honestly here — this should be a genuine, real risk, not a throwaway line. If a pick is genuinely close to a lock — the gap in quality, form, or matchup is too lopsided for a real counter-case to exist — set "counterpoint" to null instead of manufacturing a weak reason. Do NOT write filler like "No real case here" — either give a real, specific reason it might not hit, or use null. Never contradict or undercut your own pick and confidence level; this is a risk-awareness note when a genuine one exists, not a second opinion.
 
 Each pick needs its own "explanation", shown in a dedicated detail view. Format each as 3-4 short bullet points, NOT one long paragraph — each bullet starts with "• ". Since this whole response must be valid JSON, separate bullets using the two-character escape sequence \n (backslash followed by the letter n) inside the JSON string — do NOT insert a raw/literal line break. Keep each explanation tight, roughly 60-90 words total across all bullets combined, but still information-dense — every bullet should carry a real, specific fact, not filler. Cover whichever of these are most relevant to that specific pick (you don't need all of them every time): what the sportsbook odds imply and whether that's justified; the key form/stats angle (group-stage record, goal difference); a specific tactical/style-of-play matchup detail (pressing, possession, set pieces, how one team's approach exploits the other's weakness); a specific player tendency or player-level detail (a key scorer, playmaker, or defensive liability by name, clearly flagged as general knowledge, not live data); an injury or squad note if relevant (same caveat); historical head-to-head context if it matters. Prefer specific, named details (a player, a tactical trait, a stat) over generic statements like "has a strong squad." Write each bullet as a punchy, specific claim — no throat-clearing, no restating the obvious.
+
+In addition to the per-match picks above, also build ONE overall "AI Parlay" for today — your single best combination of picks across ALL the matches listed, chosen because you have genuine, strong confidence each leg individually hits AND that the combination realistically hits together.
+
+Parlay rules:
+- Use 4 legs ONLY if you have genuine high confidence in all 4 individually. Otherwise use exactly 3. Never fewer than 3, never more than 4.
+- Each leg must be pulled from the same markets/data already provided above for these matches (Moneyline/Tie, Spread, Totals, Anytime Goal Scorer, or 2+ Assists) — don't invent a market or price that isn't in the data.
+- Strongly prefer legs from different matches so the parlay's outcomes are genuinely independent of each other. Only include two legs from the same match if you have a specific, well-reasoned case for why they're not just paying twice for the same event, and say so explicitly in that leg's "reason".
+- Actively choose the legs — across all matches — that you would genuinely combine into one parlay today. This is not "copy your top pick from 3-4 random matches"; weigh which specific combination has the best realistic chance of ALL legs hitting together.
+- If fewer than 3 matches have usable market data, set "parlay" to the JSON value null instead of forcing a weak combination.
+- Each leg needs a one-sentence "reason" it's included. Also write a 1-2 sentence "summary" for the whole parlay explaining the combination.
 
 ${hasWCData ? `
 === WORLD CUP 2026 — UPCOMING MATCHES ===
@@ -299,7 +327,15 @@ Return a JSON object with this exact structure:
         }
       ]
     }
-  ]
+  ],
+  "parlay": {
+    "legs": [
+      { "event": "Team A vs Team B", "pick": "Team A -0.5", "betType": "Spread", "odds": "+110", "reason": "One sentence on why this leg is in the parlay." },
+      { "event": "Team C vs Team D", "pick": "Tie", "betType": "Moneyline", "odds": "+220", "reason": "One sentence on why this leg is in the parlay." },
+      { "event": "Team E vs Team F", "pick": "Over 2.5", "betType": "Totals", "odds": "-115", "reason": "One sentence on why this leg is in the parlay." }
+    ],
+    "summary": "One or two sentences on why this specific combination."
+  }
 }
 
 Rules:
@@ -309,6 +345,7 @@ Rules:
 - Include the match date in "matchTime" (e.g. "Fri, Jul 3 · 3:00 PM ET") so it's clear which day each pick is for.
 - Confidence: High = very likely to win, Medium = probably wins but real risk exists, Low = leaning this way but genuinely uncertain
 - If no upcoming World Cup matches are listed, return an empty array
+- "parlay" must have exactly 3 or 4 entries in "legs", or be the JSON value null if fewer than 3 matches have usable market data — never 1, 2, or 5+.
 - Always return valid JSON only, no other text`;
 
   const message = await client.messages.create({
@@ -360,7 +397,19 @@ Rules:
     .filter((p): p is NonNullable<typeof p> => p !== null);
   await recordPicks(pickHistory, newPickInputs).catch(() => {});
 
-  return { matches: picks.worldcup ?? [], errors };
+  // Defensively validate the AI's parlay shape rather than trusting it
+  // outright — a malformed parlay shouldn't take down the whole picks
+  // response, it should just fall back to no parlay this cycle.
+  const rawParlay = picks.parlay;
+  const parlay: AiParlay | null =
+    rawParlay &&
+    Array.isArray(rawParlay.legs) &&
+    (rawParlay.legs.length === 3 || rawParlay.legs.length === 4) &&
+    typeof rawParlay.summary === 'string'
+      ? { legs: rawParlay.legs, summary: rawParlay.summary }
+      : null;
+
+  return { matches: picks.worldcup ?? [], parlay, errors };
 }
 
 // Wrapped in Next's persistent Data Cache (not a plain in-memory variable —
@@ -378,12 +427,14 @@ export async function GET() {
 
     return NextResponse.json({
       worldcup: worldcupResult.matches,
+      parlay: worldcupResult.parlay,
       generatedAt: new Date().toISOString(),
       errors: worldcupResult.errors,
     });
   } catch (err) {
     return NextResponse.json({
       worldcup: [],
+      parlay: null,
       generatedAt: new Date().toISOString(),
       errors: [`AI analysis failed: ${err instanceof Error ? err.message : 'Unknown error'}`],
     });

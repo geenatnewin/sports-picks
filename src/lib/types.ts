@@ -13,8 +13,22 @@ export interface MatchPick {
   picks: PickOption[]; // exactly 2, ranked most likely to hit first
 }
 
+export interface AiParlayLeg {
+  event: string;
+  pick: string;
+  betType: string;
+  odds: string;
+  reason: string;
+}
+
+export interface AiParlay {
+  legs: AiParlayLeg[]; // exactly 3 or 4
+  summary: string;
+}
+
 export interface PicksResponse {
   worldcup: MatchPick[];
+  parlay: AiParlay | null;
   generatedAt: string;
   errors: string[];
 }

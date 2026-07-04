@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import MarketsBrowser from '@/components/MarketsBrowser';
 import ParlaySlip from '@/components/ParlaySlip';
 import MyPicksPanel from '@/components/MyPicksPanel';
+import AiParlayBox from '@/components/AiParlayBox';
 import { PicksResponse } from '@/lib/types';
 import { ParlayLeg, PlacedSlip } from '@/lib/parlay';
 
@@ -33,6 +34,13 @@ export default function Home() {
       const exists = prev.find((l) => l.id === leg.id);
       if (exists) return prev.filter((l) => l.id !== leg.id);
       return [...prev, leg];
+    });
+  }, []);
+
+  const addLegsToSlip = useCallback((newLegs: ParlayLeg[]) => {
+    setLegs((prev) => {
+      const existingIds = new Set(prev.map((l) => l.id));
+      return [...prev, ...newLegs.filter((l) => !existingIds.has(l.id))];
     });
   }, []);
 
@@ -129,8 +137,9 @@ export default function Home() {
         </div>
       </aside>
 
-      {/* Main content */}
-      <main className={`flex-1 max-w-2xl mx-auto w-full px-4 py-6 md:py-8 space-y-6 ${legs.length > 0 ? 'pb-24' : ''}`}>
+      {/* Main content + AI Parlay */}
+      <div className="flex-1 flex flex-col lg:flex-row min-w-0">
+      <main className={`flex-1 min-w-0 max-w-2xl mx-auto w-full px-4 py-6 md:py-8 space-y-6 ${legs.length > 0 ? 'pb-24' : ''}`}>
         {lastUpdated && !loading && data?.errors && data.errors.length > 0 && (
           <p className="text-amber-600 text-xs text-center">Some data sources unavailable</p>
         )}
@@ -223,6 +232,13 @@ export default function Home() {
           For entertainment only. Please bet responsibly.
         </footer>
       </main>
+
+      <aside className="w-full lg:w-80 shrink-0 px-4 pb-6 lg:py-8 lg:pr-6">
+        <div className="lg:sticky lg:top-6">
+          <AiParlayBox parlay={data?.parlay ?? null} loading={loading} onAddToSlip={addLegsToSlip} />
+        </div>
+      </aside>
+      </div>
 
       <ParlaySlip legs={legs} onRemove={removeLeg} onClear={clearLegs} onPlace={placeBet} />
       <MyPicksPanel slips={placedSlips} onRemoveSlip={removeSlip} />
