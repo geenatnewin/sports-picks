@@ -9,7 +9,7 @@
 
 ## What this is
 
-A sports betting picks web app covering the **2026 World Cup**. It pulls real sportsbook odds (moneyline/spread/totals + player props), prediction-market probabilities (Kalshi + Polymarket), team stats, and recent form, feeds it all to Claude, and shows **two** AI picks per match, ranked purely by how likely each is to actually hit (Moneyline/Tie, Spread, Totals, and player props are all eligible candidates — no separate "value" pick, and the AI is explicitly told not to just mechanically grab the two shortest-odds favorites). Each pick has its own explanation and an optional "counterpoint" — only shown when there's a genuine, credible reason it might not hit, omitted entirely for near-locks (kept deliberately, confirmed cheap to keep — see Session 7). Also has a manual Game/Player Props browser you can tap to build a parlay, track placed slips, and a floating "My Picks" panel. Golf support was fully removed in Session 5; **MLB support was added in Session 7 and fully removed again in Session 9** (see below) — both were built, shipped, then deleted once no longer wanted.
+A sports betting picks web app covering the **2026 World Cup**. It pulls real sportsbook odds (moneyline/spread/totals + player props), prediction-market probabilities (Kalshi + Polymarket), team stats, and recent form, feeds it all to Claude, and shows **two** AI picks per match, ranked purely by how likely each is to actually hit (Moneyline/Tie, Spread, Totals, and player props are all eligible candidates — no separate "value" pick, and the AI is explicitly told not to just mechanically grab the two shortest-odds favorites). Each pick has its own explanation and an optional "counterpoint" — only shown when there's a genuine, credible reason it might not hit, omitted entirely for near-locks (kept deliberately, confirmed cheap to keep — see Session 7). There's also a right-side **"AI Parlay" box** (Session 10): the same AI call also builds one best 3- or 4-leg parlay for the day across all matches, shown with combined odds and an "Add All to Parlay Slip" button. Plus a manual Game/Player Props browser you can tap to build a parlay, track placed slips, and a floating "My Picks" panel. Golf support was fully removed in Session 5; **MLB support was added in Session 7 and fully removed again in Session 9** (see below) — both were built, shipped, then deleted once no longer wanted.
 
 Branding: displayed name is **"Dylan Harper's 'Trust Me' Locks"**. The codebase/repo/folder are still named `sports-picks` — only the Vercel project itself was renamed to `dylanharperpicks`.
 
@@ -58,10 +58,11 @@ src/
     api/
       picks/route.ts       ← generatePicks(), one unstable_cache entry. MOCK_PICKS toggle, JSON sanitizer.
       odds/route.ts        ← Formats raw odds into browsable markets for the Game Props UI.
-    page.tsx                ← Homepage: left sidebar (branding + Refresh), Game/Player Props tabs
+    page.tsx                ← Homepage: left sidebar (branding + Refresh), main World Cup section + Game/Player Props tabs, right-side AI Parlay column
     globals.css              ← Theme, "3D" depth utility classes (card-elevated, chip-elevated, btn-raised, panel-elevated-*, chip-selected)
   components/
     MarketsBrowser.tsx     ← Per-match cards: odds + AI pick summary + L5 form chips + tap-to-open detail modal.
+    AiParlayBox.tsx         ← NEW (Session 10). Right-side box rendering the AI's best 3-4 leg parlay, combined odds via lib/parlay.ts, "Add All to Parlay Slip" button.
     ParlaySlip.tsx         ← Bottom parlay builder bar, Place Bet flow
     MyPicksPanel.tsx        ← Floating button + slide-out "My Picks" drawer
     MySlips.tsx             ← Renders placed slip history (used inside MyPicksPanel)
@@ -71,8 +72,8 @@ src/
     predictionMarkets.ts   ← Kalshi (series KXWCGAME) + Polymarket clients.
     propline.ts            ← PropLine client. getWorldCupPlayerProps().
     pickHistory.ts         ← Grades finished picks against real scores, stores/aggregates win-rate in Vercel Blob for prompt calibration.
-    parlay.ts              ← Parlay odds math (American ↔ decimal, payout calc), PlacedSlip type
-    types.ts                ← Shared types. PicksResponse has a `worldcup` array.
+    parlay.ts              ← Parlay odds math (American ↔ decimal, payout calc), PlacedSlip type — also reused client-side to compute the AI Parlay's combined odds.
+    types.ts                ← Shared types. PicksResponse has `worldcup` and `parlay` (AiParlay | null).
 ```
 
 ---
@@ -94,7 +95,7 @@ src/
 
 ## What's left to do
 
-- [ ] **Not yet verified against a real AI call**: Session 8's prompt tightening and Session 9's MLB removal both shipped on typecheck/build confidence only — worth a spot-check of real output next time picks are naturally viewed live.
+- [ ] **Not yet verified against a real AI call**: Session 8's prompt tightening, Session 9's MLB removal, and Session 10's AI Parlay feature all shipped on typecheck/build confidence only — worth a spot-check of real output next time picks are naturally viewed live, especially whether the AI actually returns `parlay: null` appropriately vs. forcing a weak combination.
 - [ ] Consider adding NBA or another sport again someday — discussed a few times but not started fresh since MLB was removed. If revisited, treat it as new work rather than resurrecting the deleted MLB code.
 - [ ] Watch for a repeat of the truncated-JSON issue fixed in Session 5 (max_tokens bump) if output grows further
 - [ ] Player Props tab is still a "coming soon" placeholder — PropLine data feeds the AI prompt but was never built into a browsable tab UI
@@ -181,3 +182,13 @@ src/
 - No MLB-specific Vercel env vars existed to clean up (it shared `ODDS_API_KEY`/`PROPLINE_API_KEY`/`ANTHROPIC_API_KEY`/`BLOB_READ_WRITE_TOKEN` with soccer, unlike golf's dedicated `DATAGOLF_API_KEY`).
 - Verified locally: typecheck + build clean, and confirmed no layout regression by temporarily flipping `MOCK_PICKS` to `true` and screenshotting the homepage with Playwright's CLI (`chromium-cli` wasn't available in this environment, used `npx playwright screenshot` directly instead) — sidebar correctly shows only branding + Refresh, World Cup header/tabs render in red, no MLB remnants. Reverted the mock flag before deploying.
 - Deployed and realiased as usual — the alias-staleness gotcha recurred again; confirmed live via `/api/odds` (no `sport` param needed anymore, returns World Cup matches correctly).
+
+### Session 10 — July 3, 2026 (same day, continued session)
+- **Added an "AI Parlay" feature** per request: a right-side box showing the AI's single best 3-leg (or 4-leg, only if genuinely all high-confidence) parlay for the day, built across all upcoming matches rather than per-match.
+- Deliberately extended the *existing* single Anthropic call/prompt in `generatePicks()` rather than adding a second AI call — the parlay task reuses the same odds/stats/prediction-market data already in the prompt, so it adds a bit of output tokens but **no additional API call and no meaningful spend increase**. Given this session immediately followed Session 9's MLB removal (whose whole point was cutting a second AI call), a second call here would have undone that.
+- Prompt rules added: use 4 legs only with genuine high confidence in all 4, otherwise exactly 3; prefer legs from different matches for real independence; return `parlay: null` if fewer than 3 matches have usable data rather than forcing a weak combination; each leg gets a one-sentence "reason", plus an overall "summary".
+- New types in `lib/types.ts`: `AiParlayLeg`, `AiParlay`, and `PicksResponse.parlay: AiParlay | null`. Backend defensively validates the AI's parlay shape (exactly 3 or 4 legs, string summary) and falls back to `null` rather than letting a malformed parlay break the whole picks response.
+- New `src/components/AiParlayBox.tsx`: renders the legs, combined American odds (computed client-side by reusing the existing `lib/parlay.ts` math — no new odds-math code), the summary, and an "Add All to Parlay Slip" button that merges the legs into the existing bet-builder flow (`page.tsx`'s new `addLegsToSlip`, dedupes by leg id).
+- Restructured `page.tsx`'s layout: wrapped `main` and a new right-side `aside` (sticky on large screens, stacks below on mobile) in a shared flex row, nested inside the existing left-sidebar row. `MOCK_PICKS` mode also got a `buildMockParlay()` (top-3/4 favorites across matches) so local preview mode has a populated box too.
+- Verified locally: typecheck + build clean. Since local dev has no real `ODDS_API_KEY` (blank, per the standing safety net), `MOCK_PICKS = true` alone couldn't populate real legs — temporarily hardcoded a fake 3-leg `AiParlay` object directly in `page.tsx` for a Playwright screenshot, confirmed the box renders correctly (legs, correct combined-odds math: -120/-105/-180 → +457, matches manual calculation) and that clicking "Add All to Parlay Slip" correctly populates the bottom ParlaySlip bar ("3 legs · Combined +457"). Reverted the hardcoded test data and `MOCK_PICKS` before deploying — used `npx playwright screenshot`/a small script again since `chromium-cli` still isn't available in this environment (had to point `NODE_PATH`/run the script from beside npx's cached `playwright` package to get ESM import resolution working).
+- Deployed and realiased as usual — the alias-staleness gotcha recurred again; confirmed the site and the free `/api/odds` endpoint load correctly (didn't hit `/api/picks` directly, per the standing preference to avoid an unnecessary paid AI call just to check).
