@@ -1,6 +1,6 @@
 # Dylan Harper's "Trust Me" Locks — Handoff
 
-**Last updated:** July 3, 2026 (evening, end of Session 10)
+**Last updated:** July 3, 2026 (evening, end of Session 10, MLB-removal spot-check)
 **Project location:** `C:\Users\Navin\Desktop\sports-picks`
 **Live site:** https://dylanharperpicks.vercel.app
 **GitHub:** https://github.com/geenatnewin/sports-picks (connected to Vercel — push to `main` auto-deploys)
@@ -96,6 +96,7 @@ src/
 ## What's left to do
 
 - [ ] **Not yet verified against a real AI call**: Session 8's prompt tightening, Session 9's MLB removal, and Session 10's AI Parlay feature all shipped on typecheck/build confidence only — worth a spot-check of real output next time picks are naturally viewed live, especially whether the AI actually returns `parlay: null` appropriately vs. forcing a weak combination.
+- [x] Session 9's MLB removal spot-checked visually this session (`MOCK_PICKS` flipped to `true` temporarily, then reverted): sidebar shows only branding + Refresh with no leftover sport switcher, World Cup header still renders in red, no layout breakage. Couldn't get past the "Setup Required" empty state locally though — confirms the note above (line 91): local `.env.local` has `ODDS_API_KEY`/`ANTHROPIC_API_KEY` intentionally blank, and the early "no data + no key" guard in `generatePicks()` short-circuits before `MOCK_PICKS` is ever checked. A real local check of mock mode would need a real `ODDS_API_KEY` pasted in temporarily.
 - [ ] Consider adding NBA or another sport again someday — discussed a few times but not started fresh since MLB was removed. If revisited, treat it as new work rather than resurrecting the deleted MLB code.
 - [ ] Watch for a repeat of the truncated-JSON issue fixed in Session 5 (max_tokens bump) if output grows further
 - [ ] Player Props tab is still a "coming soon" placeholder — PropLine data feeds the AI prompt but was never built into a browsable tab UI
