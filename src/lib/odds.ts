@@ -83,14 +83,7 @@ export function getFinishedScores(): Promise<FinishedScore[]> {
   return getFinishedScoresForSport('soccer_fifa_world_cup');
 }
 
-export function getMlbFinishedScores(): Promise<FinishedScore[]> {
-  return getFinishedScoresForSport('baseball_mlb');
-}
-
-// MLB runs ~15 games/night league-wide, vs. the World Cup's handful — so its
-// fallback (when there's nothing today) shows every game from the single
-// nearest upcoming day only, never games spanning two different days.
-async function getOddsForSport(sportKey: string, wholeDayFallback = false): Promise<OddsGame[]> {
+async function getOddsForSport(sportKey: string): Promise<OddsGame[]> {
   if (!KEY) return [];
   try {
     // FanDuel/DraftKings are the priority books, but we also shop a handful
@@ -121,14 +114,6 @@ async function getOddsForSport(sportKey: string, wholeDayFallback = false): Prom
     const upcoming = notFinished.filter((g) => new Date(g.commence_time) >= now);
     if (upcoming.length === 0) return [];
 
-    if (wholeDayFallback) {
-      // No games today — show every game from the single nearest upcoming
-      // day (all same calendar date), not just one game and not spanning
-      // multiple future days.
-      const nextDayKey = nyDateKey(new Date(upcoming[0].commence_time));
-      return upcoming.filter((g) => nyDateKey(new Date(g.commence_time)) === nextDayKey);
-    }
-
     // No games today — show just the single next upcoming game, nothing further out.
     return [upcoming[0]];
   } catch {
@@ -138,10 +123,6 @@ async function getOddsForSport(sportKey: string, wholeDayFallback = false): Prom
 
 export function getWorldCupOdds(): Promise<OddsGame[]> {
   return getOddsForSport('soccer_fifa_world_cup');
-}
-
-export function getMlbOdds(): Promise<OddsGame[]> {
-  return getOddsForSport('baseball_mlb', true);
 }
 
 export function formatAmericanOdds(price: number): string {

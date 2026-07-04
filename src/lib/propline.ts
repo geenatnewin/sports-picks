@@ -24,11 +24,6 @@ export interface PlayerProps {
   twoPlusAssists: string | null;
 }
 
-export interface MlbPlayerProps {
-  homeRuns: string | null;
-  pitcherStrikeouts: string | null;
-}
-
 // Best (lowest/most-favorable) price per player across all bookmakers for a
 // given market, capped to the most credible `limit` candidates — keeps the
 // AI prompt compact instead of listing every player on both rosters.
@@ -114,25 +109,6 @@ export async function getWorldCupPlayerProps(
     result.set(event, {
       anytimeScorers: byMarket.get('anytime_goal_scorer') ?? null,
       twoPlusAssists: byMarket.get('player_2plus_assists') ?? null,
-    });
-  }
-  return result;
-}
-
-// Same pattern for MLB: anytime home run and (starting) pitcher strikeouts —
-// the two most standard MLB player props, same "cap it small" approach.
-export async function getMlbPlayerProps(
-  matches: { homeTeam: string; awayTeam: string }[]
-): Promise<Map<string, MlbPlayerProps>> {
-  const raw = await getPlayerPropsForSport('baseball_mlb', matches, [
-    { key: 'batter_home_runs', limit: 5 },
-    { key: 'pitcher_strikeouts', limit: 4 },
-  ]);
-  const result = new Map<string, MlbPlayerProps>();
-  for (const [event, byMarket] of raw) {
-    result.set(event, {
-      homeRuns: byMarket.get('batter_home_runs') ?? null,
-      pitcherStrikeouts: byMarket.get('pitcher_strikeouts') ?? null,
     });
   }
   return result;

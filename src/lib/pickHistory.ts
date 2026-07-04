@@ -3,7 +3,6 @@ import { FinishedScore } from './odds';
 
 export interface StoredPick {
   gameId: string;
-  sport: 'soccer' | 'mlb';
   event: string;
   homeTeam: string;
   awayTeam: string;
@@ -88,7 +87,6 @@ function gradePick(pick: StoredPick, score: FinishedScore): 'win' | 'loss' | 'pu
 
 export interface NewPickInput {
   gameId: string;
-  sport: 'soccer' | 'mlb';
   event: string;
   homeTeam: string;
   awayTeam: string;
@@ -104,10 +102,8 @@ export interface TrackRecordSummary {
 
 const MIN_GRADED_FOR_SUMMARY = 3;
 
-// Filters to one sport first so each sport's AI prompt gets its own
-// calibration signal instead of a blended win rate across both.
-function summarize(history: StoredPick[], sport: 'soccer' | 'mlb'): TrackRecordSummary {
-  const graded = history.filter((h) => h.sport === sport && h.graded && h.result);
+function summarize(history: StoredPick[]): TrackRecordSummary {
+  const graded = history.filter((h) => h.graded && h.result);
   if (graded.length < MIN_GRADED_FOR_SUMMARY) return { promptText: null };
 
   const tally = (list: StoredPick[]) => {
@@ -137,17 +133,7 @@ function summarize(history: StoredPick[], sport: 'soccer' | 'mlb'): TrackRecordS
 // short track-record summary to feed into the AI prompt as a calibration
 // signal. New picks from the current run are recorded separately via
 // recordPicks() once the AI response is available.
-// NOTE: if soccer and MLB picks are ever generated concurrently (they
-// currently are, in api/picks/route.ts, for latency), this + recordPicks()
-// each read/write the full shared history file, so a simultaneous cache-miss
-// for both sports can race — one sport's write can clobber the other's.
-// Accepted tradeoff: this file only feeds the "soft signal" calibration text
-// below, never the picks users see, and self-corrects on the next cache
-// cycle. Not worth serializing two AI calls (doubling latency) to avoid.
-export async function gradeAndSummarize(
-  finishedScores: FinishedScore[],
-  sport: 'soccer' | 'mlb'
-): Promise<{
+export async function gradeAndSummarize(finishedScores: FinishedScore[]): Promise<{
   history: StoredPick[];
   summary: TrackRecordSummary;
 }> {
@@ -169,7 +155,7 @@ export async function gradeAndSummarize(
   // MOCK_PICKS or missing data before ever calling recordPicks()).
   if (gradedAnyNew) await writeHistory(history);
 
-  return { history, summary: summarize(history, sport) };
+  return { history, summary: summarize(history) };
 }
 
 // Upserts this run's picks into the in-memory history (keyed by gameId, so
@@ -183,7 +169,6 @@ export async function recordPicks(history: StoredPick[], picks: NewPickInput[]):
     if (existing?.graded) continue; // match already finished and graded — leave it alone
     const entry: StoredPick = {
       gameId: p.gameId,
-      sport: p.sport,
       event: p.event,
       homeTeam: p.homeTeam,
       awayTeam: p.awayTeam,

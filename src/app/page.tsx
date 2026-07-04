@@ -9,36 +9,12 @@ import { ParlayLeg, PlacedSlip } from '@/lib/parlay';
 
 const SLIPS_STORAGE_KEY = 'harppicks-my-slips';
 
-type Sport = 'soccer' | 'mlb';
-
-const SPORTS: { id: Sport; label: string; emoji: string; accent: string; active: string; bar: string; chipSelected: string }[] = [
-  {
-    id: 'soccer',
-    label: 'World Cup',
-    emoji: '⚽',
-    accent: 'text-red-400',
-    active: 'border-red-500/40 bg-red-500/10',
-    bar: 'bg-red-500',
-    chipSelected: 'chip-selected',
-  },
-  {
-    id: 'mlb',
-    label: 'MLB',
-    emoji: '⚾',
-    accent: 'text-amber-400',
-    active: 'border-amber-500/40 bg-amber-500/10',
-    bar: 'bg-amber-500',
-    chipSelected: 'chip-selected-amber',
-  },
-];
-
 export default function Home() {
   const [data, setData] = useState<PicksResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string>('');
   const [legs, setLegs] = useState<ParlayLeg[]>([]);
-  const [sport, setSport] = useState<Sport>('soccer');
   const [tab, setTab] = useState<'gameProps' | 'playerProps'>('gameProps');
   const [placedSlips, setPlacedSlips] = useState<PlacedSlip[]>([]);
 
@@ -120,8 +96,7 @@ export default function Home() {
     weekday: 'long', month: 'long', day: 'numeric', year: 'numeric',
   });
 
-  const activeSport = SPORTS.find((s) => s.id === sport)!;
-  const currentPicks = sport === 'soccer' ? (data?.worldcup ?? []) : (data?.mlb ?? []);
+  const currentPicks = data?.worldcup ?? [];
   const hasNoData = data && currentPicks.length === 0;
   const aiFailed = data?.errors?.some((e) => e.includes('AI analysis failed')) ?? false;
 
@@ -135,32 +110,6 @@ export default function Home() {
           </h1>
           <p className="text-neutral-500 text-xs mt-1">&quot;Trust Me&quot; Locks</p>
         </div>
-
-        <nav className="flex flex-row md:flex-col gap-2">
-          {SPORTS.map((s) => {
-            const count = s.id === 'soccer' ? (data?.worldcup.length ?? 0) : (data?.mlb.length ?? 0);
-            const isActive = sport === s.id;
-            return (
-              <button
-                key={s.id}
-                onClick={() => setSport(s.id)}
-                className={`flex-1 md:flex-none flex items-center gap-3 px-3 py-2.5 rounded-lg border text-left transition-colors ${
-                  isActive ? s.active : 'border-transparent hover:bg-white/[0.04]'
-                }`}
-              >
-                <span className="text-xl">{s.emoji}</span>
-                <span className="flex-1 min-w-0">
-                  <span className={`block text-sm font-semibold truncate ${isActive ? s.accent : 'text-neutral-200'}`}>
-                    {s.label}
-                  </span>
-                  <span className="block text-xs text-neutral-600">
-                    {loading ? '…' : `${count} pick${count !== 1 ? 's' : ''}`}
-                  </span>
-                </span>
-              </button>
-            );
-          })}
-        </nav>
 
         <div className="md:mt-auto px-2 hidden md:flex flex-col gap-2">
           <button
@@ -202,10 +151,10 @@ export default function Home() {
 
         <section>
           <div className="relative flex items-center gap-3 mb-5 pb-3 border-b border-white/[0.06]">
-            <span className={`absolute -top-6 left-0 h-0.5 w-10 rounded-full ${activeSport.bar}`} />
-            <span className="text-2xl">{activeSport.emoji}</span>
+            <span className="absolute -top-6 left-0 h-0.5 w-10 rounded-full bg-red-500" />
+            <span className="text-2xl">⚽</span>
             <div className="flex-1">
-              <h2 className={`font-bold text-lg tracking-tight ${activeSport.accent}`}>{activeSport.label}</h2>
+              <h2 className="font-bold text-lg tracking-tight text-red-400">World Cup</h2>
               <p className="text-neutral-600 text-xs">
                 {loading ? 'Loading…' : `${currentPicks.length} pick${currentPicks.length !== 1 ? 's' : ''}`}
               </p>
@@ -225,7 +174,7 @@ export default function Home() {
             <button
               onClick={() => setTab('gameProps')}
               className={`chip-elevated text-sm px-4 py-2 rounded-lg ${
-                tab === 'gameProps' ? `${activeSport.chipSelected} ${activeSport.accent}` : 'text-neutral-300'
+                tab === 'gameProps' ? 'chip-selected text-red-400' : 'text-neutral-300'
               }`}
             >
               Game Props
@@ -233,7 +182,7 @@ export default function Home() {
             <button
               onClick={() => setTab('playerProps')}
               className={`chip-elevated text-sm px-4 py-2 rounded-lg ${
-                tab === 'playerProps' ? `${activeSport.chipSelected} ${activeSport.accent}` : 'text-neutral-300'
+                tab === 'playerProps' ? 'chip-selected text-red-400' : 'text-neutral-300'
               }`}
             >
               Player Props
@@ -259,7 +208,6 @@ export default function Home() {
                 picks={currentPicks}
                 picksLoading={loading}
                 aiFailed={aiFailed}
-                sport={sport}
               />
             </div>
           )}

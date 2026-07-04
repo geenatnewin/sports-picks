@@ -3,18 +3,15 @@ import { unstable_cache } from 'next/cache';
 import Anthropic from '@anthropic-ai/sdk';
 import {
   getWorldCupOdds,
-  getMlbOdds,
   getBestLine,
   getLineDivergence,
   getFinishedScores,
-  getMlbFinishedScores,
   formatAmericanOdds,
   normalizeOutcomeName,
 } from '@/lib/odds';
 import { getWorldCupStandings, getTeamRecentForm, summarizeRecentForm } from '@/lib/soccer';
-import { getMlbStandings, getTeamRecentForm as getMlbTeamRecentForm, summarizeRecentForm as summarizeMlbForm } from '@/lib/baseball';
 import { getPredictionMarkets } from '@/lib/predictionMarkets';
-import { getWorldCupPlayerProps, getMlbPlayerProps } from '@/lib/propline';
+import { getWorldCupPlayerProps } from '@/lib/propline';
 import { gradeAndSummarize, recordPicks } from '@/lib/pickHistory';
 import { MatchPick, PicksResponse } from '@/lib/types';
 
@@ -54,29 +51,6 @@ function findTeamStats(rows: StandingsRow[], teamName: string): string | null {
   const row = findTeamRow(rows, teamName);
   if (!row) return null;
   return `${row.playedGames}P ${row.won}W-${row.draw}D-${row.lost}L, ${row.goalsFor}-${row.goalsAgainst} GF-GA, ${row.points}pts (group position ${row.position})`;
-}
-
-interface MlbStandingsRow {
-  team: { id: number; name: string };
-  wins: number;
-  losses: number;
-  streak?: { streakCode: string };
-}
-
-// MLB Stats API standings only give the short mascot name ("Rays"), while
-// The Odds API gives the full team name ("Tampa Bay Rays") — match by
-// substring instead of equality, same approach as lib/baseball.ts.
-function findMlbTeamRow(rows: MlbStandingsRow[], teamName: string): MlbStandingsRow | null {
-  const needle = teamName.toLowerCase();
-  return rows.find((r) => needle.includes(r.team.name.toLowerCase())) ?? null;
-}
-
-function findMlbTeamStats(rows: MlbStandingsRow[], teamName: string): string | null {
-  const row = findMlbTeamRow(rows, teamName);
-  if (!row) return null;
-  const played = row.wins + row.losses;
-  const pct = played > 0 ? (row.wins / played).toFixed(3) : '.000';
-  return `${row.wins}-${row.losses} (${pct})${row.streak ? `, streak ${row.streak.streakCode}` : ''}`;
 }
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -144,29 +118,6 @@ function buildMockWorldCup(data: { homeTeam: string; awayTeam: string; kickoff: 
   });
 }
 
-function buildMockMlb(data: { homeTeam: string; awayTeam: string; kickoff: string; mlRaw: { name: string; price: number }[] }[]) {
-  return data.map((g) => {
-    const sorted = [...g.mlRaw].sort((a, b) => a.price - b.price); // most negative (favorite) first
-    const favorite = sorted[0];
-    const secondFavorite = sorted[1] ?? favorite;
-
-    const mockOption = (outcome: typeof favorite) => ({
-      pick: outcome ? outcome.name : g.homeTeam,
-      betType: 'Moneyline',
-      odds: outcome ? formatAmericanOdds(outcome.price) : 'N/A',
-      confidence: 'High' as const,
-      explanation: `[Preview] Placeholder pick using real odds — not real analysis yet. Add a real ANTHROPIC_API_KEY to get actual reasoning here.`,
-      counterpoint: null,
-    });
-
-    return {
-      event: `${g.homeTeam} vs ${g.awayTeam}`,
-      matchTime: g.kickoff,
-      picks: [mockOption(favorite), mockOption(secondFavorite)],
-    };
-  });
-}
-
 async function generatePicks(): Promise<SportPicksResult> {
   const errors: string[] = [];
 
@@ -181,7 +132,7 @@ async function generatePicks(): Promise<SportPicksResult> {
   // against real final scores, so the AI can see how its own past picks
   // have performed. New picks from this run are recorded further below,
   // once the AI response is available.
-  const { history: pickHistory, summary: trackRecord } = await gradeAndSummarize(finishedScores, 'soccer');
+  const { history: pickHistory, summary: trackRecord } = await gradeAndSummarize(finishedScores);
 
   // Flatten group standings into one lookup table
   const standingsRows: StandingsRow[] = (wcStandings?.standings ?? []).flatMap(
@@ -397,7 +348,6 @@ Rules:
       if (!game || !topPick) return null;
       return {
         gameId: game.gameId,
-        sport: 'soccer' as const,
         event: p.event,
         homeTeam: game.homeTeam,
         awayTeam: game.awayTeam,
@@ -413,267 +363,27 @@ Rules:
   return { matches: picks.worldcup ?? [], errors };
 }
 
-async function generateMlbPicks(): Promise<SportPicksResult> {
-  const errors: string[] = [];
-
-  const [mlbOdds, mlbStandings, finishedScores] = await Promise.all([
-    getMlbOdds().catch(() => { errors.push('MLB odds unavailable'); return []; }),
-    getMlbStandings().catch(() => { errors.push('MLB standings unavailable'); return null; }),
-    getMlbFinishedScores().catch(() => []),
-  ]);
-
-  const { history: pickHistory, summary: trackRecord } = await gradeAndSummarize(finishedScores, 'mlb');
-
-  const standingsRows: MlbStandingsRow[] = (mlbStandings?.records ?? []).flatMap(
-    (r: { teamRecords?: MlbStandingsRow[] }) => r.teamRecords ?? []
-  );
-
-  // Same 6-game cap as World Cup for AI-prompt cost control — the Game Props
-  // browser (/api/odds?sport=mlb) still shows every game the odds fetch
-  // returns, uncapped; only picks generation is limited.
-  const mlbData = await Promise.all(
-    mlbOdds.slice(0, 6).map(async (game) => {
-      const ml = getBestLine(game, 'h2h');
-      const spread = getBestLine(game, 'spreads');
-      const totals = getBestLine(game, 'totals');
-      const lineDivergence = getLineDivergence(game, 'h2h');
-      const markets = await getPredictionMarkets(game.home_team, game.away_team, 'KXMLBGAME').catch(() => ({
-        polymarket: null,
-        kalshi: null,
-      }));
-
-      const homeRow = findMlbTeamRow(standingsRows, game.home_team);
-      const awayRow = findMlbTeamRow(standingsRows, game.away_team);
-      const [homeGames, awayGames] = await Promise.all([
-        homeRow ? getMlbTeamRecentForm(homeRow.team.id).catch(() => null) : Promise.resolve(null),
-        awayRow ? getMlbTeamRecentForm(awayRow.team.id).catch(() => null) : Promise.resolve(null),
-      ]);
-      const homeForm = homeRow ? summarizeMlbForm(homeGames, homeRow.team.id) : null;
-      const awayForm = awayRow ? summarizeMlbForm(awayGames, awayRow.team.id) : null;
-
-      const formatMarket = (outcomes: { label: string; probability: number }[] | null) =>
-        outcomes ? outcomes.map((o) => `${o.label}: ${o.probability}%`).join(' | ') : null;
-
-      return {
-        gameId: game.id,
-        homeTeam: game.home_team,
-        awayTeam: game.away_team,
-        kickoffISO: game.commence_time,
-        kickoff: new Date(game.commence_time).toLocaleString('en-US', {
-          timeZone: 'America/New_York',
-          weekday: 'short',
-          month: 'short',
-          day: 'numeric',
-          hour: 'numeric',
-          minute: '2-digit',
-        }),
-        mlRaw: ml ?? [],
-        moneyline: ml ? ml.map((o) => `${o.name}: ${formatAmericanOdds(o.price)}`).join(' | ') : 'Not available',
-        spread: spread
-          ? spread.map((o) => `${o.name} ${o.point && o.point > 0 ? '+' : ''}${o.point ?? ''}: ${formatAmericanOdds(o.price)}`).join(' | ')
-          : 'Not available',
-        totals: totals
-          ? totals.map((o) => `${o.name} ${o.point ?? ''}: ${formatAmericanOdds(o.price)}`).join(' | ')
-          : 'Not available',
-        homeStats: findMlbTeamStats(standingsRows, game.home_team) ?? 'No season record yet',
-        awayStats: findMlbTeamStats(standingsRows, game.away_team) ?? 'No season record yet',
-        homeForm: homeForm ?? 'No recent game history',
-        awayForm: awayForm ?? 'No recent game history',
-        polymarket: formatMarket(markets.polymarket),
-        kalshi: formatMarket(markets.kalshi),
-        lineDivergence,
-      };
-    })
-  );
-
-  // Player props (anytime home run, starting pitcher strikeouts) from
-  // PropLine, matched to these games by team names.
-  const playerPropsByMatch = await getMlbPlayerProps(
-    mlbData.map((g) => ({ homeTeam: g.homeTeam, awayTeam: g.awayTeam }))
-  ).catch(() => new Map<string, { homeRuns: string | null; pitcherStrikeouts: string | null }>());
-
-  const mlbDataWithProps = mlbData.map((g) => {
-    const props = playerPropsByMatch.get(`${g.homeTeam} vs ${g.awayTeam}`);
-    return {
-      ...g,
-      homeRuns: props?.homeRuns ?? null,
-      pitcherStrikeouts: props?.pitcherStrikeouts ?? null,
-    };
-  });
-
-  const hasMlbData = mlbData.length > 0;
-
-  if (!hasMlbData && !process.env.ANTHROPIC_API_KEY) {
-    return { matches: [], errors: ['API keys not configured yet. See HANDOFF.md for setup instructions.'] };
-  }
-
-  if (MOCK_PICKS) {
-    return { matches: buildMockMlb(mlbData), errors };
-  }
-
-  const mlbPrompt = `You are a professional sports handicapper. For EVERY game listed below, produce your TOP 2 picks, ranked most likely to hit first. Each pick can be ANY of: Moneyline, Spread, Totals, Anytime Home Run, or Pitcher Strikeouts (when those player props are listed for that game) — they don't have to be the same market or player. Baseball has NO tie/draw outcome — Moneyline is strictly the home team or the away team, nothing else.
-
-Ranking rules:
-- Rank purely by how confident you genuinely are that each pick will actually hit — this is a "will it happen" ranking, not a payout ranking. Pick 1 is your single most confident outcome for this game; Pick 2 is your second most confident outcome, and it must still be a real, credible pick you'd genuinely bet on.
-- Form your own probability judgment from the stats, prediction-market data, and baseball knowledge below — do NOT just mechanically pick the two shortest-odds/lowest-payout favorites on the board because they look "safe." If your analysis says the market is off on a given outcome, weight your own read over the raw odds.
-- Don't fill both slots with player props — Moneyline, Spread, and Totals are real, often higher-probability markets. Only pick a player prop when it's genuinely one of your two most confident outcomes for this specific game (e.g. an elite ace overwhelmingly favored to clear a modest strikeout line against a weak lineup), not by default.
-- Recent form (last 5) and the starting-pitcher matchup should be able to override a fine-looking season record — a team can have a good overall record and still be quietly out of form, or facing a starkly unfavorable pitching matchup, on this particular day. Treat a bad recent stretch or a lopsided starter/bullpen matchup as a real reason to lower confidence in that team's Moneyline, or flip the pick to the opponent — not just a footnote mentioned alongside the season record. Blowout losses tend to happen exactly when this signal was quietly bad despite a fine overall record.
-
-IMPORTANT: "Anytime home run" and "Pitcher strikeouts" lines below are pre-filtered to only the handful of most likely/relevant candidates per game — treat this as the realistic shortlist, not the full roster. If a game has no such lines listed, no player props are available for it — don't invent players or props that aren't shown.
-
-Use everything provided below to determine the pick and confidence level: the odds from the sportsbooks listed, Kalshi and Polymarket prediction market prices (these reflect real money betting and are often sharper than sportsbook odds — weigh them heavily, especially when they disagree with the sportsbook implied probability), each team's season record and current streak, each team's actual last 5 game results (weight recent form heavily, especially if it diverges from the season-long record), and your own general baseball knowledge. That knowledge should actively cover, wherever relevant: the starting pitcher matchup for each side (a pitcher's typical effectiveness, strikeout stuff, recent form — flagged clearly as general knowledge, not a live injury/rotation feed); bullpen strength and recent fatigue/overuse; home-field and park-factor effects (some parks favor hitters, others pitchers); a lineup's power or contact profile; and any notable head-to-head history between these two teams. Don't limit your reasoning to just the numeric stats provided — actively factor in this baseball-specific knowledge, not just as a passing mention.
-
-IMPORTANT: Do not treat two teams' records as equivalent just because win/loss numbers look similar — weigh the quality of the opponents that produced those results and each team's overall roster strength. Bake strength-of-schedule judgment into both the pick and the confidence level, not just the raw record.
-
-IMPORTANT: Some games include a "Line divergence" note — how widely sportsbooks disagree with each other on the same outcome's implied win probability. This is a soft market-uncertainty signal only, not a real fixing-detection tool. It does NOT indicate which side is more likely to win. Never claim, imply, or speculate that a game is fixed, manipulated, or rigged. When flagged, the only appropriate uses are: (1) treat it as a reason to be more conservative (e.g. drop confidence from High to Medium), and (2) optionally add one brief, neutrally-worded bullet if genuinely relevant. Do not speculate about why.
-
-IMPORTANT: Do NOT mention, cite, or name-drop "Kalshi", "Polymarket", "prediction markets", or their specific prices anywhere in the explanation text. Use that data silently to inform your pick and confidence. If you're relying on general knowledge rather than the data provided (e.g. a pitcher's current form), say so plainly rather than stating it as verified fact — you do not have a live injury/rotation feed.
-${trackRecord.promptText ? `
-IMPORTANT: Here is your own track record on past MLB picks, graded against actual results: ${trackRecord.promptText} Use this only as a light calibration signal, and never mention it in the explanation text.
-` : ''}
-
-IMPORTANT: Each pick may have a "counterpoint" field — one short sentence giving the single best, most credible real reason this specific pick might NOT hit, grounded in the actual data/knowledge above. If a pick is genuinely close to a lock, set "counterpoint" to null instead of manufacturing a weak reason. Do NOT write filler like "No real case here" — either give a real, specific reason, or use null.
-
-Each pick needs its own "explanation", shown in a dedicated detail view. Format each as 3-4 short bullet points, NOT one long paragraph — each bullet starts with "• ". Since this whole response must be valid JSON, separate bullets using the two-character escape sequence \n inside the JSON string — do NOT insert a raw/literal line break. Keep each explanation tight, roughly 60-90 words total across all bullets combined, but information-dense. Cover whichever of these are most relevant: what the odds imply and whether that's justified; the season record/streak/recent-form angle; the starting pitcher matchup; bullpen or park-factor notes; a specific player detail (clearly flagged as general knowledge). Prefer specific, named details over generic statements. Write each bullet as a punchy, specific claim.
-
-${hasMlbData ? `
-=== MLB — UPCOMING GAMES ===
-${mlbDataWithProps.map((g, i) => `
-Game ${i + 1}: ${g.homeTeam} vs ${g.awayTeam}
-First pitch (ET): ${g.kickoff}
-Moneyline: ${g.moneyline}
-Spread: ${g.spread}
-Totals: ${g.totals}
-Polymarket: ${g.polymarket ?? 'Not available'}
-Kalshi: ${g.kalshi ?? 'Not available'}
-${g.homeTeam} season record: ${g.homeStats}
-${g.awayTeam} season record: ${g.awayStats}
-${g.homeTeam} last 5 results: ${g.homeForm}
-${g.awayTeam} last 5 results: ${g.awayForm}
-${g.homeRuns ? `Anytime home run (most likely candidates): ${g.homeRuns}` : ''}
-${g.pitcherStrikeouts ? `Pitcher strikeouts (over/under lines): ${g.pitcherStrikeouts}` : ''}
-${g.lineDivergence.flagged ? `Line divergence: FLAGGED — sportsbooks disagree by ~${g.lineDivergence.maxSpreadPct} points on ${g.lineDivergence.outcome}'s implied probability` : ''}
-`).join('\n')}
-` : 'No upcoming MLB games with posted odds right now.'}
-
-Return a JSON object with this exact structure:
-{
-  "mlb": [
-    {
-      "event": "Team A vs Team B",
-      "matchTime": "Fri, Jul 3 · 7:05 PM ET",
-      "picks": [
-        {
-          "pick": "Team A -1.5",
-          "betType": "Spread",
-          "odds": "+110",
-          "confidence": "High",
-          "explanation": "• Bullet one\n• Bullet two\n• Bullet three",
-          "counterpoint": null
-        },
-        {
-          "pick": "Team B",
-          "betType": "Moneyline",
-          "odds": "+150",
-          "confidence": "Medium",
-          "explanation": "• Bullet one\n• Bullet two",
-          "counterpoint": "One short sentence on the best real reason this might not hit."
-        }
-      ]
-    }
-  ]
-}
-
-Rules:
-- Every game listed must get exactly 2 entries in "picks", ranked most likely to hit first — do not skip any game, and do not return more or fewer than 2.
-- "counterpoint" must be either a real, specific sentence or the JSON value null — never an empty string or a placeholder.
-- There is no Tie/Draw outcome — never include one.
-- Include the game date in "matchTime" (e.g. "Fri, Jul 3 · 7:05 PM ET").
-- Confidence: High = very likely to win, Medium = probably wins but real risk exists, Low = leaning this way but genuinely uncertain
-- If no upcoming MLB games are listed, return an empty array
-- Always return valid JSON only, no other text`;
-
-  const mlbMessage = await client.messages.create({
-    model: 'claude-sonnet-5',
-    max_tokens: 8000,
-    messages: [{ role: 'user', content: mlbPrompt }],
-  });
-
-  const mlbTextBlock = mlbMessage.content.find((block) => block.type === 'text');
-  const mlbText = mlbTextBlock && mlbTextBlock.type === 'text' ? mlbTextBlock.text : '';
-  const mlbJsonMatch = mlbText.match(/\{[\s\S]*\}/);
-  if (!mlbJsonMatch) {
-    console.error('No JSON in MLB AI response. stop_reason:', mlbMessage.stop_reason, 'text:', mlbText.slice(0, 2000));
-    throw new Error('No JSON in MLB AI response');
-  }
-
-  let mlbPicks;
-  try {
-    mlbPicks = JSON.parse(sanitizeJsonText(mlbJsonMatch[0]));
-  } catch (err) {
-    console.error('MLB JSON parse failed. stop_reason:', mlbMessage.stop_reason, 'raw:', mlbJsonMatch[0].slice(0, 3000));
-    throw err;
-  }
-  const mlbPicksList: { event: string; picks: { pick: string; betType: string; confidence: 'High' | 'Medium' | 'Low' }[] }[] = mlbPicks.mlb ?? [];
-
-  const mlbByEvent = new Map(mlbData.map((g) => [`${g.homeTeam} vs ${g.awayTeam}`, g]));
-  const newMlbPickInputs = mlbPicksList
-    .map((p) => {
-      const game = mlbByEvent.get(p.event);
-      const topPick = p.picks?.[0];
-      if (!game || !topPick) return null;
-      return {
-        gameId: game.gameId,
-        sport: 'mlb' as const,
-        event: p.event,
-        homeTeam: game.homeTeam,
-        awayTeam: game.awayTeam,
-        kickoff: game.kickoffISO,
-        betType: topPick.betType,
-        pick: topPick.pick,
-        confidence: topPick.confidence,
-      };
-    })
-    .filter((p): p is NonNullable<typeof p> => p !== null);
-  await recordPicks(pickHistory, newMlbPickInputs).catch(() => {});
-
-  return { matches: mlbPicks.mlb ?? [], errors };
-}
-
 // Wrapped in Next's persistent Data Cache (not a plain in-memory variable —
 // see comment above) so the 20-minute TTL actually holds across requests
 // hitting different serverless instances. If the generator throws, the
 // failed result is not cached, so the next request retries against the AI
-// instead of getting stuck on a cached error. Soccer and MLB get separate
-// cache entries so a slow/failed call for one sport doesn't block the other.
+// instead of getting stuck on a cached error.
 const getCachedWorldCupPicks = unstable_cache(generatePicks, ['sports-picks-ai-picks-soccer'], {
-  revalidate: CACHE_TTL_SECONDS,
-});
-const getCachedMlbPicks = unstable_cache(generateMlbPicks, ['sports-picks-ai-picks-mlb'], {
   revalidate: CACHE_TTL_SECONDS,
 });
 
 export async function GET() {
   try {
-    // Run in parallel — on a cache miss this means one AI call's wait time
-    // instead of two back-to-back. Both generators read/write the same
-    // shared pick-history Blob file, so concurrent execution can theoretically
-    // race and one sport's calibration write could clobber the other's — but
-    // that file only feeds the "soft signal" track-record calibration text
-    // (see pickHistory.ts), never the picks themselves, and self-corrects
-    // next cache cycle. Not worth doubling user-facing latency to avoid.
-    const [worldcupResult, mlbResult] = await Promise.all([getCachedWorldCupPicks(), getCachedMlbPicks()]);
+    const worldcupResult = await getCachedWorldCupPicks();
 
     return NextResponse.json({
       worldcup: worldcupResult.matches,
-      mlb: mlbResult.matches,
       generatedAt: new Date().toISOString(),
-      errors: [...worldcupResult.errors, ...mlbResult.errors],
+      errors: worldcupResult.errors,
     });
   } catch (err) {
     return NextResponse.json({
       worldcup: [],
-      mlb: [],
       generatedAt: new Date().toISOString(),
       errors: [`AI analysis failed: ${err instanceof Error ? err.message : 'Unknown error'}`],
     });
