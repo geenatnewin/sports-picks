@@ -107,6 +107,7 @@ src/
 - User felt the AI picks were purely model-driven and wanted real sports-betting-analyst perspective baked in, specifically citing market bias toward big-name/big teams. Recommended a 2-person "advisory board" of real analysts as the conceptual basis: Rufus Peabody (quant + sharp-money model-vs-market reasoning) and R.J. Bell of Pregame.com (public bias / "trap game" analysis of big-name teams).
 - Added both lenses directly into the `generatePicks()` prompt in `src/app/api/picks/route.ts` (see note above under "Current mode") rather than as a separate feature/UI — kept as prompt-only since it's a reasoning improvement, not new data.
 - Typechecked and built clean. **Not yet verified against a real AI call** (consistent with the standing cost-conscious policy — see "What's left to do").
+- Deployed and realiased as usual — the alias-staleness gotcha recurred yet again; confirmed live via `/api/odds` (200) without hitting `/api/picks` directly.
 
 ## Session Log
 
