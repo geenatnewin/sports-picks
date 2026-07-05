@@ -1,8 +1,20 @@
 import { NextResponse } from 'next/server';
 import { getWorldCupOdds, getBestLine, getLineDivergence, formatAmericanOdds, normalizeOutcomeName } from '@/lib/odds';
 import { getMatchRecentForm } from '@/lib/soccer';
+import { getKalshiAdvance } from '@/lib/predictionMarkets';
 
-const MARKET_LABELS: Record<string, string> = { h2h: 'Moneyline', spreads: 'Spread', totals: 'Total Goals' };
+// Game lines/props only — no player props here (those live in the separate
+// Player Props tab, fed by PropLine). h2h/spreads/totals now shop Kalshi
+// alongside sportsbooks (see injectKalshiBookmaker in lib/odds.ts); draw_no_bet
+// is sportsbook-only (The Odds API already carries it). "To Advance" isn't in
+// this table since it comes from a separate Kalshi-only lookup below, not
+// the shopped-bookmakers list — it only exists for knockout-stage matches.
+const MARKET_LABELS: Record<string, string> = {
+  h2h: 'Moneyline',
+  spreads: 'Spread',
+  totals: 'Total Goals',
+  draw_no_bet: 'Draw No Bet',
+};
 
 function outcomeLabel(marketKey: string, name: string, point?: number): string {
   const label = normalizeOutcomeName(name);
@@ -36,6 +48,23 @@ export async function GET() {
           };
         })
         .filter((m): m is NonNullable<typeof m> => m !== null);
+
+      // Knockout-stage only (no KXWCADVANCE event exists for group-stage
+      // games, which is exactly the filter this needs) — the one real
+      // market that settles on the full match including extra time/penalties.
+      const advance = await getKalshiAdvance(game.home_team, game.away_team).catch(() => null);
+      if (advance) {
+        markets.push({
+          key: 'to_advance',
+          label: 'To Advance',
+          outcomes: advance.map((o) => ({
+            id: `${game.id}-to_advance-${o.team}`,
+            label: o.team,
+            odds: formatAmericanOdds(o.price),
+            oddsValue: o.price,
+          })),
+        });
+      }
 
       const { homeForm, awayForm } = await getMatchRecentForm(game.home_team, game.away_team).catch(() => ({
         homeForm: null,

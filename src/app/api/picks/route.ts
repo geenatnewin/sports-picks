@@ -10,7 +10,7 @@ import {
   normalizeOutcomeName,
 } from '@/lib/odds';
 import { getWorldCupStandings, getTeamRecentForm, summarizeRecentForm } from '@/lib/soccer';
-import { getPredictionMarkets } from '@/lib/predictionMarkets';
+import { getPredictionMarkets, getKalshiAdvance } from '@/lib/predictionMarkets';
 import { getWorldCupPlayerProps } from '@/lib/propline';
 import { gradeAndSummarize, recordPicks } from '@/lib/pickHistory';
 import { AiParlay, MatchPick } from '@/lib/types';
@@ -165,10 +165,13 @@ async function generatePicks(): Promise<SportPicksResult> {
       const totals = getBestLine(game, 'totals');
       const drawNoBet = getBestLine(game, 'draw_no_bet');
       const lineDivergence = getLineDivergence(game, 'h2h');
-      const markets = await getPredictionMarkets(game.home_team, game.away_team).catch(() => ({
-        polymarket: null,
-        kalshi: null,
-      }));
+      const [markets, advance] = await Promise.all([
+        getPredictionMarkets(game.home_team, game.away_team).catch(() => ({
+          polymarket: null,
+          kalshi: null,
+        })),
+        getKalshiAdvance(game.home_team, game.away_team).catch(() => null),
+      ]);
 
       const homeRow = findTeamRow(standingsRows, game.home_team);
       const awayRow = findTeamRow(standingsRows, game.away_team);
@@ -208,6 +211,11 @@ async function generatePicks(): Promise<SportPicksResult> {
         drawNoBet: drawNoBet
           ? drawNoBet.map((o) => `${normalizeOutcomeName(o.name)}: ${formatAmericanOdds(o.price)}`).join(' | ')
           : 'Not available',
+        // Only present for knockout-stage matches (Kalshi has no KXWCADVANCE
+        // event for group-stage games) — this is the natural "is this even a
+        // knockout match" filter, no separate stage lookup needed.
+        toAdvance: advance ? advance.map((o) => `${o.team}: ${formatAmericanOdds(o.price)}`).join(' | ') : null,
+        toAdvanceTickers: advance ? new Map(advance.map((o) => [o.team, o.ticker])) : null,
         homeStats: findTeamStats(standingsRows, game.home_team) ?? 'No group-stage record yet',
         awayStats: findTeamStats(standingsRows, game.away_team) ?? 'No group-stage record yet',
         homeForm: homeForm ?? 'No recent match history',
@@ -247,7 +255,7 @@ async function generatePicks(): Promise<SportPicksResult> {
   }
 
   // Build AI prompt
-  const prompt = `You are a sharp professional sports analyst — someone with deep knowledge of both football itself (tactics, players, squad quality, injuries, motivation) and how sports betting markets actually work (how odds get set, how public perception distorts a line, how bet types settle differently from each other). You are not a stats model; you reason the way a real professional handicapper does, weighing everything a pure numbers-based system would miss. For EVERY match listed below, produce your TOP 2 picks, ranked most likely to hit first. Consider ALL available markets as candidates: Moneyline (including Tie), Draw No Bet, Spread, Totals, Anytime Goal Scorer, and 2+ Assists (when those player props are listed for that match) — genuinely weigh all of them, don't default to Moneyline out of habit and don't reach for a player prop just for variety either.
+  const prompt = `You are a sharp professional sports analyst — someone with deep knowledge of both football itself (tactics, players, squad quality, injuries, motivation) and how sports betting markets actually work (how odds get set, how public perception distorts a line, how bet types settle differently from each other). You are not a stats model; you reason the way a real professional handicapper does, weighing everything a pure numbers-based system would miss. For EVERY match listed below, produce your TOP 2 picks, ranked most likely to hit first. Consider ALL available markets as candidates: Moneyline (including Tie), Draw No Bet, To Advance (only listed for knockout-stage matches), Spread, Totals, Anytime Goal Scorer, and 2+ Assists (when those player props are listed for that match) — genuinely weigh all of them, don't default to Moneyline out of habit and don't reach for a player prop just for variety either.
 
 Ranking rules:
 - Rank purely by how confident you genuinely are that each pick will actually hit — this is a "will it happen" ranking, not a payout ranking. Pick 1 is your single most confident outcome for this match; Pick 2 is your second most confident outcome, and it must still be a real, credible pick you'd genuinely bet on — not just "whatever's next best if nothing else is likely."
@@ -265,11 +273,11 @@ Use everything provided below to determine the pick and your confidence level: t
 
 IMPORTANT: Understand exactly what each market settles on — these are NOT interchangeable, and confusing them produces picks that are technically wrong even when your read of the match is right:
 - "Moneyline" (including Tie) settles ONLY on the 90-minute regulation score. In a knockout-stage match, a team can go on to win in extra time or penalties and still make this pick a LOSS if regulation itself ended level — this is standard sportsbook settlement, not a bug. Do not treat "this team will advance/ultimately win" as equivalent to "this team wins Moneyline."
-- "Draw No Bet" is a team-to-win market that instead pushes (refunds, no win/loss) if regulation ends level, rather than losing outright. This is the sharper pick over Moneyline whenever you like a team to ultimately be the better/winning side but a genuine regulation draw is a live possibility — it avoids losing on the exact scenario Moneyline is vulnerable to.
-- Neither of these markets is a bet on the team advancing past a knockout round overall (that would require settlement on the full match including extra time/penalties) — this app does not have that market's real odds available, so never present a Moneyline or Draw No Bet pick as if it's a bet on "advancing," even in the explanation text.
+- "Draw No Bet" is a team-to-win market that instead pushes (refunds, no win/loss) if regulation ends level, rather than losing outright. This is sharper than Moneyline whenever you like a team to ultimately be the better/winning side but a genuine regulation draw is a live possibility.
+- "To Advance" (only listed for knockout-stage matches, sourced from a prediction-market exchange rather than a sportsbook) is the ONE real market here that settles on the actual full match outcome including extra time and penalties — this is the correct pick whenever your read is genuinely "this team progresses past this tie," not Moneyline or Draw No Bet. When "To Advance" is listed for a knockout match and a real extra-time/penalties scenario is plausible (see the knockout-psychology note below), prefer it over Moneyline/Draw No Bet for that exact reasoning — it's a strictly more accurate bet for "who progresses" than either.
 - "Totals" (Over/Under) also settles on 90-minute regulation goals only — the same caveat applies if you're reasoning about how open or cagey a match will be into extra time.
 
-IMPORTANT: In knockout-stage matches specifically (Round of 32 onward, not group stage — use your own knowledge of the tournament schedule/format to judge which matches are knockout fixtures from the date and round context), factor in genuine knockout-match psychology, not just squad quality: single-elimination pressure often makes a big favorite noticeably more cautious/tense than in a normal league match (protecting a result rather than chasing a bigger margin), while a clear underdog frequently sets up defensively and is content to survive to penalties rather than take risks. This is a real football dynamic, not just a market-pricing quirk, and it means regulation draws happen more often in knockout matches between a big favorite and a well-organized underdog than the raw quality gap alone would suggest — factor this into your confidence on Moneyline specifically, and consider whether Draw No Bet or Tie is the sharper pick in exactly this kind of matchup.
+IMPORTANT: In knockout-stage matches specifically (Round of 32 onward, not group stage — use your own knowledge of the tournament schedule/format to judge which matches are knockout fixtures from the date and round context), factor in genuine knockout-match psychology, not just squad quality: single-elimination pressure often makes a big favorite noticeably more cautious/tense than in a normal league match (protecting a result rather than chasing a bigger margin), while a clear underdog frequently sets up defensively and is content to survive to penalties rather than take risks. This is a real football dynamic, not just a market-pricing quirk, and it means regulation draws happen more often in knockout matches between a big favorite and a well-organized underdog than the raw quality gap alone would suggest — factor this into your confidence on Moneyline specifically, and consider whether Draw No Bet, To Advance (if listed), or Tie is the sharper pick in exactly this kind of matchup. When you like a team to genuinely be the better side in a knockout tie where a regulation draw is plausible, To Advance is usually the sharpest of these three — it's the only one that actually pays off however the tie resolves (normal time, extra time, or penalties), rather than just avoiding a loss (Draw No Bet) or requiring a regulation result specifically (Moneyline).
 
 IMPORTANT: Apply two analyst-grounded reasoning checks to every pick before finalizing it — these reflect how real professional sports bettors actually reason, not generic caution:
 1. Model-vs-market blend check: your own analysis and the market price (sportsbook odds, Kalshi, Polymarket) are both partial signals — neither should be trusted blindly. When your read of the stats/form/tactical matchup disagrees with the market, that disagreement is real information, but scale your confidence in overriding the market to the SIZE and SPECIFICITY of the gap: a small or vague disagreement should mostly defer to the market; a large gap backed by a concrete, specific reason (a real form/tactical/injury factor the market appears to be missing) justifies real conviction against it. Don't override the market just to look independent, and don't rubber-stamp the market's favorite just because it's convenient — both are failure modes.
@@ -310,6 +318,7 @@ Moneyline: ${g.moneyline}
 Spread: ${g.spread}
 Totals: ${g.totals}
 Draw No Bet: ${g.drawNoBet}
+${g.toAdvance ? `To Advance (knockout match — settles on the real outcome including extra time/penalties): ${g.toAdvance}` : ''}
 Polymarket: ${g.polymarket ?? 'Not available'}
 Kalshi: ${g.kalshi ?? 'Not available'}
 ${g.homeTeam} group-stage record: ${g.homeStats}
@@ -339,7 +348,7 @@ Return a JSON object with this exact structure:
         },
         {
           "pick": "Team B",
-          "betType": "Draw No Bet",
+          "betType": "To Advance",
           "odds": "-150",
           "confidence": "Medium",
           "explanation": "• Same bullet-point format as above",
@@ -403,6 +412,11 @@ Rules:
       const game = wcByEvent.get(p.event);
       const topPick = p.picks?.[0];
       if (!game || !topPick) return null;
+      // "To Advance" can't be graded from a regulation-time score (see
+      // pickHistory.ts) — stash the specific Kalshi market ticker so grading
+      // can check Kalshi's own settlement instead.
+      const kalshiTicker =
+        topPick.betType.toLowerCase() === 'to advance' ? game.toAdvanceTickers?.get(topPick.pick.trim()) : undefined;
       return {
         gameId: game.gameId,
         event: p.event,
@@ -412,6 +426,7 @@ Rules:
         betType: topPick.betType,
         pick: topPick.pick,
         confidence: topPick.confidence,
+        kalshiTicker,
       };
     })
     .filter((p): p is NonNullable<typeof p> => p !== null);

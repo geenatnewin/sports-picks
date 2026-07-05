@@ -1,5 +1,6 @@
 import { get, put } from '@vercel/blob';
 import { FinishedScore } from './odds';
+import { getKalshiMarketResult } from './predictionMarkets';
 
 export interface StoredPick {
   gameId: string;
@@ -13,6 +14,10 @@ export interface StoredPick {
   generatedAt: string; // ISO
   graded: boolean;
   result?: 'win' | 'loss' | 'push';
+  // Only set for "To Advance" picks — a regulation-time score can't tell us
+  // who actually advanced, so grading looks up Kalshi's own settlement
+  // instead (see gradeToAdvancePick below).
+  kalshiTicker?: string;
 }
 
 const HISTORY_PATH = 'pick-history.json';
@@ -104,6 +109,7 @@ export interface NewPickInput {
   betType: string;
   pick: string;
   confidence: 'High' | 'Medium' | 'Low';
+  kalshiTicker?: string;
 }
 
 export interface TrackRecordSummary {
@@ -126,7 +132,7 @@ function summarize(history: StoredPick[]): TrackRecordSummary {
   };
 
   const overall = tally(graded);
-  const byMarket = ['Moneyline', 'Draw No Bet', 'Spread', 'Totals']
+  const byMarket = ['Moneyline', 'Draw No Bet', 'To Advance', 'Spread', 'Totals']
     .map((market) => ({ market, ...tally(graded.filter((h) => h.betType === market)) }))
     .filter((m) => m.wins + m.losses + m.pushes > 0);
 
@@ -153,6 +159,20 @@ export async function gradeAndSummarize(finishedScores: FinishedScore[]): Promis
   let gradedAnyNew = false;
   for (const pick of history) {
     if (pick.graded) continue;
+
+    // "To Advance" can't be graded from a regulation-time score — a knockout
+    // tie can go to extra time/penalties, which the score alone doesn't
+    // resolve. Ask Kalshi directly instead, since it's the source of truth
+    // this pick was actually made against.
+    if (pick.betType.toLowerCase() === 'to advance' && pick.kalshiTicker) {
+      const result = await getKalshiMarketResult(pick.kalshiTicker);
+      if (result === null) continue; // not settled yet
+      pick.result = result === 'yes' ? 'win' : 'loss';
+      pick.graded = true;
+      gradedAnyNew = true;
+      continue;
+    }
+
     const score = scoresById.get(pick.gameId);
     if (!score) continue;
     pick.result = gradePick(pick, score);
@@ -188,6 +208,7 @@ export async function recordPicks(history: StoredPick[], picks: NewPickInput[]):
       kickoff: p.kickoff,
       generatedAt: new Date().toISOString(),
       graded: false,
+      kalshiTicker: p.kalshiTicker,
     };
     byGameId.set(p.gameId, entry);
   }

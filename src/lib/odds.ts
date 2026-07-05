@@ -1,4 +1,5 @@
 import { OddsGame } from './types';
+import { getKalshiSpread, getKalshiTotal, getKalshiMoneyline } from './predictionMarkets';
 
 const BASE = 'https://api.the-odds-api.com/v4';
 const KEY = process.env.ODDS_API_KEY;
@@ -83,6 +84,33 @@ export function getFinishedScores(): Promise<FinishedScore[]> {
   return getFinishedScoresForSport('soccer_fifa_world_cup');
 }
 
+// Adds Kalshi's own spread/total prices as one more "book" per game, so
+// getBestLine shops it alongside FanDuel/DraftKings/etc. Kalshi's threshold
+// markets are equivalent bets at the same point value (see predictionMarkets.ts),
+// so this is a genuine price comparison, not an approximation.
+async function injectKalshiBookmaker(games: OddsGame[]): Promise<OddsGame[]> {
+  return Promise.all(
+    games.map(async (game) => {
+      const [moneyline, spread, total] = await Promise.all([
+        getKalshiMoneyline(game.home_team, game.away_team).catch(() => null),
+        getKalshiSpread(game.home_team, game.away_team).catch(() => null),
+        getKalshiTotal(game.home_team, game.away_team).catch(() => null),
+      ]);
+      if (!moneyline && !spread && !total) return game;
+
+      const markets = [];
+      if (moneyline) markets.push({ key: 'h2h', outcomes: moneyline });
+      if (spread) markets.push({ key: 'spreads', outcomes: spread });
+      if (total) markets.push({ key: 'totals', outcomes: total });
+
+      return {
+        ...game,
+        bookmakers: [...game.bookmakers, { key: 'kalshi', title: 'Kalshi', markets }],
+      };
+    })
+  );
+}
+
 async function getOddsForSport(sportKey: string): Promise<OddsGame[]> {
   if (!KEY) return [];
   try {
@@ -109,13 +137,13 @@ async function getOddsForSport(sportKey: string): Promise<OddsGame[]> {
       .sort((a, b) => new Date(a.commence_time).getTime() - new Date(b.commence_time).getTime());
 
     const todaysGames = notFinished.filter((g) => nyDateKey(new Date(g.commence_time)) === todayKey);
-    if (todaysGames.length > 0) return todaysGames;
+    if (todaysGames.length > 0) return injectKalshiBookmaker(todaysGames);
 
     const upcoming = notFinished.filter((g) => new Date(g.commence_time) >= now);
     if (upcoming.length === 0) return [];
 
     // No games today — show just the single next upcoming game, nothing further out.
-    return [upcoming[0]];
+    return injectKalshiBookmaker([upcoming[0]]);
   } catch {
     return [];
   }
