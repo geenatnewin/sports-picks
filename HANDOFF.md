@@ -29,7 +29,7 @@ Branding: displayed name is **"Dylan Harper's 'Trust Me' Locks"**. The codebase/
 
 **MLB was added in Session 7 and fully removed in Session 9** — see the Session 9 log entry for why and what changed. The app is soccer-only again as of this session.
 
-**New: "advisory board" analyst lenses in the AI prompt.** Added two extra instructions to `generatePicks()`'s prompt (Session 11), inspired by real sharp-betting analysts rather than pure stats: (1) a model-vs-market gap check — weigh your own analysis over the market instead of defaulting to whichever side is already favored; (2) a public-bias/"trap game" check — big-name/historically elite teams (Brazil, Argentina, France, etc.) routinely get shorter odds and more public confidence than current form justifies, so verify a big-name pick against THIS tournament's actual form/matchup, not reputation. This is framed as market psychology/public bias, explicitly not match-fixing — kept consistent with the existing line-divergence rule that already forbids implying a match is rigged.
+**"Advisory board" analyst lenses in the AI prompt.** Added in Session 11 as a generic two-paragraph version, then **deepened in Session 12** using an actual ingested knowledge base (see `C:\Users\Navin\Desktop\advisory-board\knowledge\wiki\rufus-peabody.md` and `rj-bell.md`) instead of paraphrase: (1) a model-vs-market blend check — scale confidence in overriding the market to the size/specificity of the gap (Peabody's real stance: neither pure-model nor pure-market betting is right, and conviction should scale with a concrete, specific reason, not just any disagreement); (2) a reputation-vs-current-form check — big-name/historically dominant teams draw shorter odds and more public confidence than current form justifies (Bell's documented "popularity premium" pattern, e.g. Alabama, marquee-QB teams), but explicitly guarded against overcorrecting: fading a popular team with no real supporting case is its own mistake (Bell's "you can't be a contrarian for the sake of being a contrarian — you also have to be right"). Still framed as market psychology/public bias, explicitly not match-fixing — consistent with the existing line-divergence rule.
 
 ---
 
@@ -97,7 +97,7 @@ src/
 
 ## What's left to do
 
-- [ ] **Not yet verified against a real AI call**: Session 8's prompt tightening, Session 9's MLB removal, Session 10's AI Parlay feature, and Session 11's advisory-board lenses all shipped on typecheck/build confidence only — worth a spot-check of real output next time picks are naturally viewed live, especially whether the AI actually returns `parlay: null` appropriately vs. forcing a weak combination.
+- [ ] **Not yet verified against a real AI call**: Session 8's prompt tightening, Session 9's MLB removal, Session 10's AI Parlay feature, Session 11's advisory-board lenses, and Session 12's deepened advisory-board lenses all shipped on typecheck/build confidence only — worth a spot-check of real output next time picks are naturally viewed live, especially whether the AI actually returns `parlay: null` appropriately vs. forcing a weak combination.
 - [x] Session 9's MLB removal spot-checked visually this session (`MOCK_PICKS` flipped to `true` temporarily, then reverted): sidebar shows only branding + Refresh with no leftover sport switcher, World Cup header still renders in red, no layout breakage. Couldn't get past the "Setup Required" empty state locally though — confirms the note above (line 91): local `.env.local` has `ODDS_API_KEY`/`ANTHROPIC_API_KEY` intentionally blank, and the early "no data + no key" guard in `generatePicks()` short-circuits before `MOCK_PICKS` is ever checked. A real local check of mock mode would need a real `ODDS_API_KEY` pasted in temporarily.
 - [ ] Consider adding NBA or another sport again someday — discussed a few times but not started fresh since MLB was removed. If revisited, treat it as new work rather than resurrecting the deleted MLB code.
 - [ ] Watch for a repeat of the truncated-JSON issue fixed in Session 5 (max_tokens bump) if output grows further
@@ -108,6 +108,10 @@ src/
 - Added both lenses directly into the `generatePicks()` prompt in `src/app/api/picks/route.ts` (see note above under "Current mode") rather than as a separate feature/UI — kept as prompt-only since it's a reasoning improvement, not new data.
 - Typechecked and built clean. **Not yet verified against a real AI call** (consistent with the standing cost-conscious policy — see "What's left to do").
 - Deployed and realiased as usual — the alias-staleness gotcha recurred yet again; confirmed live via `/api/odds` (200) without hitting `/api/picks` directly.
+
+### Session 12 — July 5, 2026 (this session)
+- Replaced Session 11's generic two-paragraph advisory-board lenses with versions grounded in the actual ingested Peabody/Bell knowledge base (`advisory-board/knowledge/wiki/`) built earlier this session in a separate project: model-vs-market blend check now explicitly scales conviction to the size/specificity of the gap (Peabody's real stance), and the reputation-vs-form check now explicitly guards against overcorrecting into reflexive contrarianism (Bell's "you also have to be right" stance) — the earlier version risked the AI fading every popular team without real justification.
+- Typechecked and built clean. **Not yet verified against a real AI call** (see "What's left to do" — same standing cost-conscious policy).
 
 ## Session Log
 
