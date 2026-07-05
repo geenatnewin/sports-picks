@@ -163,6 +163,7 @@ async function generatePicks(): Promise<SportPicksResult> {
       const ml = getBestLine(game, 'h2h');
       const spread = getBestLine(game, 'spreads');
       const totals = getBestLine(game, 'totals');
+      const drawNoBet = getBestLine(game, 'draw_no_bet');
       const lineDivergence = getLineDivergence(game, 'h2h');
       const markets = await getPredictionMarkets(game.home_team, game.away_team).catch(() => ({
         polymarket: null,
@@ -204,6 +205,9 @@ async function generatePicks(): Promise<SportPicksResult> {
         totals: totals
           ? totals.map((o) => `${o.name} ${o.point ?? ''}: ${formatAmericanOdds(o.price)}`).join(' | ')
           : 'Not available',
+        drawNoBet: drawNoBet
+          ? drawNoBet.map((o) => `${normalizeOutcomeName(o.name)}: ${formatAmericanOdds(o.price)}`).join(' | ')
+          : 'Not available',
         homeStats: findTeamStats(standingsRows, game.home_team) ?? 'No group-stage record yet',
         awayStats: findTeamStats(standingsRows, game.away_team) ?? 'No group-stage record yet',
         homeForm: homeForm ?? 'No recent match history',
@@ -243,7 +247,7 @@ async function generatePicks(): Promise<SportPicksResult> {
   }
 
   // Build AI prompt
-  const prompt = `You are a professional sports handicapper. For EVERY match listed below, produce your TOP 2 picks, ranked most likely to hit first. Consider ALL available markets as candidates: Moneyline (including Tie), Spread, Totals, Anytime Goal Scorer, and 2+ Assists (when those player props are listed for that match) — genuinely weigh all of them, don't default to Moneyline out of habit and don't reach for a player prop just for variety either.
+  const prompt = `You are a sharp professional sports analyst — someone with deep knowledge of both football itself (tactics, players, squad quality, injuries, motivation) and how sports betting markets actually work (how odds get set, how public perception distorts a line, how bet types settle differently from each other). You are not a stats model; you reason the way a real professional handicapper does, weighing everything a pure numbers-based system would miss. For EVERY match listed below, produce your TOP 2 picks, ranked most likely to hit first. Consider ALL available markets as candidates: Moneyline (including Tie), Draw No Bet, Spread, Totals, Anytime Goal Scorer, and 2+ Assists (when those player props are listed for that match) — genuinely weigh all of them, don't default to Moneyline out of habit and don't reach for a player prop just for variety either.
 
 Ranking rules:
 - Rank purely by how confident you genuinely are that each pick will actually hit — this is a "will it happen" ranking, not a payout ranking. Pick 1 is your single most confident outcome for this match; Pick 2 is your second most confident outcome, and it must still be a real, credible pick you'd genuinely bet on — not just "whatever's next best if nothing else is likely."
@@ -255,7 +259,17 @@ IMPORTANT: The "Anytime goal scorer" and "2+ assists" lines below are pre-filter
 
 IMPORTANT: Anytime-goalscorer props are lower true-probability than they can feel, even for a team's best player — a genuinely elite striker in great form still typically has only around a 25-45% real chance of scoring in any single match, meaningfully under 50% more often than not. Never assign High confidence to an anytime-goalscorer pick; cap it at Medium at most, and only include one at all when the specific matchup is exceptional (a very short price, a clearly weak opposing defense, strong current scoring form) — not just because a recognizable star name is available on the board.
 
+IMPORTANT: When you do consider a player prop, reason about it the way a sharp bettor projects player props — don't just look at a player's own season totals in isolation. Think top-down: how much total scoring/creative opportunity does this TEAM generate against this specific opponent (shot volume, set-piece count, crossing frequency, how much the opponent's defensive setup concedes chances), and how much of that opportunity share genuinely belongs to this specific player (is he the clear #1 target, or does he split chances with others) — a player on a team that creates little against a defensive opponent is a weaker prop than the same player's raw season numbers suggest, even if he's the team's best scorer. Also weigh role-specific detail: is he on penalties/set pieces, does the opposing fullback/center-back matchup favor or suppress him specifically.
+
 Use everything provided below to determine the pick and your confidence level: the odds from the sportsbooks listed, Kalshi and Polymarket prediction market prices (these reflect real money betting on the actual outcome and are often sharper than sportsbook odds — weigh them heavily when estimating true win probability, especially when they disagree with the sportsbook implied probability), each team's group-stage record (record, goal difference, points), each team's actual last 5 match results (a stronger "how are they playing right now" signal than the aggregate record — weight recent form heavily, especially if it diverges from the season-long record), and your own general knowledge of these national teams. That general knowledge should actively cover, wherever relevant: overall squad quality and depth; individual player tendencies and strengths (e.g. a team's top scorer's finishing quality, a key playmaker's creativity and passing range, a goalkeeper's shot-stopping reputation, a defender prone to mistakes); each team's typical tactical strategy and style of play (possession-based vs. counter-attacking, high press vs. low block, set-piece threat, defensive solidity, how they set up against stronger vs. weaker opponents); historical head-to-head results or tournament history between these two teams if it's notable; and anything you know about current injuries or squad news. Don't limit your reasoning to just the numeric stats provided — actively factor in this tactical and player-level knowledge, not just as a passing mention.
+
+IMPORTANT: Understand exactly what each market settles on — these are NOT interchangeable, and confusing them produces picks that are technically wrong even when your read of the match is right:
+- "Moneyline" (including Tie) settles ONLY on the 90-minute regulation score. In a knockout-stage match, a team can go on to win in extra time or penalties and still make this pick a LOSS if regulation itself ended level — this is standard sportsbook settlement, not a bug. Do not treat "this team will advance/ultimately win" as equivalent to "this team wins Moneyline."
+- "Draw No Bet" is a team-to-win market that instead pushes (refunds, no win/loss) if regulation ends level, rather than losing outright. This is the sharper pick over Moneyline whenever you like a team to ultimately be the better/winning side but a genuine regulation draw is a live possibility — it avoids losing on the exact scenario Moneyline is vulnerable to.
+- Neither of these markets is a bet on the team advancing past a knockout round overall (that would require settlement on the full match including extra time/penalties) — this app does not have that market's real odds available, so never present a Moneyline or Draw No Bet pick as if it's a bet on "advancing," even in the explanation text.
+- "Totals" (Over/Under) also settles on 90-minute regulation goals only — the same caveat applies if you're reasoning about how open or cagey a match will be into extra time.
+
+IMPORTANT: In knockout-stage matches specifically (Round of 32 onward, not group stage — use your own knowledge of the tournament schedule/format to judge which matches are knockout fixtures from the date and round context), factor in genuine knockout-match psychology, not just squad quality: single-elimination pressure often makes a big favorite noticeably more cautious/tense than in a normal league match (protecting a result rather than chasing a bigger margin), while a clear underdog frequently sets up defensively and is content to survive to penalties rather than take risks. This is a real football dynamic, not just a market-pricing quirk, and it means regulation draws happen more often in knockout matches between a big favorite and a well-organized underdog than the raw quality gap alone would suggest — factor this into your confidence on Moneyline specifically, and consider whether Draw No Bet or Tie is the sharper pick in exactly this kind of matchup.
 
 IMPORTANT: Apply two analyst-grounded reasoning checks to every pick before finalizing it — these reflect how real professional sports bettors actually reason, not generic caution:
 1. Model-vs-market blend check: your own analysis and the market price (sportsbook odds, Kalshi, Polymarket) are both partial signals — neither should be trusted blindly. When your read of the stats/form/tactical matchup disagrees with the market, that disagreement is real information, but scale your confidence in overriding the market to the SIZE and SPECIFICITY of the gap: a small or vague disagreement should mostly defer to the market; a large gap backed by a concrete, specific reason (a real form/tactical/injury factor the market appears to be missing) justifies real conviction against it. Don't override the market just to look independent, and don't rubber-stamp the market's favorite just because it's convenient — both are failure modes.
@@ -280,7 +294,7 @@ In addition to the per-match picks above, also build ONE overall "AI Parlay" for
 
 Parlay rules:
 - Use 4 legs ONLY if you have genuine high confidence in all 4 individually. Otherwise use exactly 3. Never fewer than 3, never more than 4.
-- Each leg must be pulled from the same markets/data already provided above for these matches (Moneyline/Tie, Spread, Totals, Anytime Goal Scorer, or 2+ Assists) — don't invent a market or price that isn't in the data.
+- Each leg must be pulled from the same markets/data already provided above for these matches (Moneyline/Tie, Draw No Bet, Spread, Totals, Anytime Goal Scorer, or 2+ Assists) — don't invent a market or price that isn't in the data.
 - Strongly prefer legs from different matches so the parlay's outcomes are genuinely independent of each other. Only include two legs from the same match if you have a specific, well-reasoned case for why they're not just paying twice for the same event, and say so explicitly in that leg's "reason".
 - Actively choose the legs — across all matches — that you would genuinely combine into one parlay today. This is not "copy your top pick from 3-4 random matches"; weigh which specific combination has the best realistic chance of ALL legs hitting together.
 - If fewer than 3 matches have usable market data, set "parlay" to the JSON value null instead of forcing a weak combination.
@@ -294,6 +308,7 @@ Kickoff (ET): ${g.kickoff}
 Moneyline: ${g.moneyline}
 Spread: ${g.spread}
 Totals: ${g.totals}
+Draw No Bet: ${g.drawNoBet}
 Polymarket: ${g.polymarket ?? 'Not available'}
 Kalshi: ${g.kalshi ?? 'Not available'}
 ${g.homeTeam} group-stage record: ${g.homeStats}
@@ -322,9 +337,9 @@ Return a JSON object with this exact structure:
           "counterpoint": null
         },
         {
-          "pick": "Tie",
-          "betType": "Moneyline",
-          "odds": "+220",
+          "pick": "Team B",
+          "betType": "Draw No Bet",
+          "odds": "-150",
           "confidence": "Medium",
           "explanation": "• Same bullet-point format as above",
           "counterpoint": "One short sentence on the best real reason this might not hit."

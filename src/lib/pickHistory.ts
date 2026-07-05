@@ -77,8 +77,18 @@ function gradePick(pick: StoredPick, score: FinishedScore): 'win' | 'loss' | 'pu
     return adjustedMargin > 0 ? 'win' : 'loss';
   }
 
-  // Moneyline (default)
   const actualWinner = margin > 0 ? 'home' : margin < 0 ? 'away' : 'tie';
+
+  if (betType === 'draw no bet') {
+    // Refunds instead of losing when regulation ends level — never grade
+    // a Draw No Bet pick as a loss just because the match was a draw.
+    if (actualWinner === 'tie') return 'push';
+    if (pickLower.includes(homeLower)) return actualWinner === 'home' ? 'win' : 'loss';
+    if (pickLower.includes(awayLower)) return actualWinner === 'away' ? 'win' : 'loss';
+    return 'push';
+  }
+
+  // Moneyline (default)
   if (pickLower.includes('tie')) return actualWinner === 'tie' ? 'win' : 'loss';
   if (pickLower.includes(homeLower)) return actualWinner === 'home' ? 'win' : 'loss';
   if (pickLower.includes(awayLower)) return actualWinner === 'away' ? 'win' : 'loss';
@@ -116,7 +126,7 @@ function summarize(history: StoredPick[]): TrackRecordSummary {
   };
 
   const overall = tally(graded);
-  const byMarket = ['Moneyline', 'Spread', 'Totals']
+  const byMarket = ['Moneyline', 'Draw No Bet', 'Spread', 'Totals']
     .map((market) => ({ market, ...tally(graded.filter((h) => h.betType === market)) }))
     .filter((m) => m.wins + m.losses + m.pushes > 0);
 

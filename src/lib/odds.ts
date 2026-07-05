@@ -91,7 +91,7 @@ async function getOddsForSport(sportKey: string): Promise<OddsGame[]> {
     // bookmakers bills as 1 "region" on The Odds API, same cost as just 2.
     const [res, completedIds] = await Promise.all([
       fetch(
-        `${BASE}/sports/${sportKey}/odds?apiKey=${KEY}&bookmakers=fanduel,draftkings,betmgm,williamhill_us,espnbet&markets=h2h,spreads,totals&oddsFormat=american`,
+        `${BASE}/sports/${sportKey}/odds?apiKey=${KEY}&bookmakers=fanduel,draftkings,betmgm,williamhill_us,espnbet&markets=h2h,spreads,totals,draw_no_bet&oddsFormat=american`,
         { next: { revalidate: 1800 } }
       ),
       getCompletedMatchIds(sportKey),
