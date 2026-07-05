@@ -1,6 +1,6 @@
 # Dylan Harper's "Trust Me" Locks — Handoff
 
-**Last updated:** July 3, 2026 (evening, end of Session 10, MLB-removal spot-check)
+**Last updated:** July 5, 2026 (end of Session 13, Draw No Bet market + sharp-analyst prompt rework)
 **Project location:** `C:\Users\Navin\Desktop\sports-picks`
 **Live site:** https://dylanharperpicks.vercel.app
 **GitHub:** https://github.com/geenatnewin/sports-picks (connected to Vercel — push to `main` auto-deploys)
