@@ -1,4 +1,4 @@
-import { OddsGame } from './types';
+import { OddsGame, Bookmaker } from './types';
 import { getKalshiSpread, getKalshiTotal, getKalshiMoneyline } from './predictionMarkets';
 
 const BASE = 'https://api.the-odds-api.com/v4';
@@ -143,15 +143,59 @@ async function injectKalshiBookmaker(games: OddsGame[]): Promise<OddsGame[]> {
   );
 }
 
+const SHOPPED_BOOKMAKERS = 'fanduel,draftkings,betmgm,williamhill_us,espnbet';
+
+// draw_no_bet is a non-featured market on The Odds API — the bulk /odds
+// endpoint used below rejects it with a 422 INVALID_MARKET (confirmed
+// directly against the live API: this had been silently failing on every
+// single request since it was first added, since getOddsForSport swallowed
+// the error into an empty array). Non-featured markets only work through the
+// per-event endpoint, one extra request per match — fetched separately here
+// and merged into the same games' bookmakers so getBestLine/getLineDivergence
+// need no changes.
+async function fetchDrawNoBet(sportKey: string, eventId: string): Promise<Bookmaker[]> {
+  if (!KEY) return [];
+  try {
+    const res = await fetch(
+      `${BASE}/sports/${sportKey}/events/${eventId}/odds?apiKey=${KEY}&bookmakers=${SHOPPED_BOOKMAKERS}&markets=draw_no_bet&oddsFormat=american`,
+      { next: { revalidate: 1800 } }
+    );
+    if (!res.ok) return [];
+    const event = await res.json();
+    return event.bookmakers ?? [];
+  } catch {
+    return [];
+  }
+}
+
+async function injectDrawNoBet(games: OddsGame[], sportKey: string): Promise<OddsGame[]> {
+  return Promise.all(
+    games.map(async (game) => {
+      const dnbBookmakers = await fetchDrawNoBet(sportKey, game.id);
+      if (dnbBookmakers.length === 0) return game;
+
+      const bookmakers = game.bookmakers.map((book) => {
+        const dnbMarket = dnbBookmakers
+          .find((b) => b.key === book.key)
+          ?.markets.find((m) => m.key === 'draw_no_bet');
+        return dnbMarket ? { ...book, markets: [...book.markets, dnbMarket] } : book;
+      });
+
+      return { ...game, bookmakers };
+    })
+  );
+}
+
 async function getOddsForSport(sportKey: string): Promise<OddsGame[]> {
   if (!KEY) return [];
   try {
     // FanDuel/DraftKings are the priority books, but we also shop a handful
     // of other major regulated US sportsbooks for the best price. Up to 10
     // bookmakers bills as 1 "region" on The Odds API, same cost as just 2.
+    // draw_no_bet is deliberately NOT requested here (see injectDrawNoBet).
     const [res, completedIds] = await Promise.all([
       fetch(
-        `${BASE}/sports/${sportKey}/odds?apiKey=${KEY}&bookmakers=fanduel,draftkings,betmgm,williamhill_us,espnbet&markets=h2h,spreads,totals,draw_no_bet&oddsFormat=american`,
+        `${BASE}/sports/${sportKey}/odds?apiKey=${KEY}&bookmakers=${SHOPPED_BOOKMAKERS}&markets=h2h,spreads,totals&oddsFormat=american`,
         { next: { revalidate: 1800 } }
       ),
       getCompletedMatchIds(sportKey),
@@ -170,13 +214,15 @@ async function getOddsForSport(sportKey: string): Promise<OddsGame[]> {
       .sort((a, b) => new Date(a.commence_time).getTime() - new Date(b.commence_time).getTime());
 
     const todaysGames = notFinished.filter((g) => nyDateKey(new Date(g.commence_time)) === todayKey);
-    if (todaysGames.length > 0) return injectKalshiBookmaker(todaysGames);
+    if (todaysGames.length > 0) {
+      return injectKalshiBookmaker(await injectDrawNoBet(todaysGames, sportKey));
+    }
 
     const upcoming = notFinished.filter((g) => new Date(g.commence_time) >= now);
     if (upcoming.length === 0) return [];
 
     // No games today — show just the single next upcoming game, nothing further out.
-    return injectKalshiBookmaker([upcoming[0]]);
+    return injectKalshiBookmaker(await injectDrawNoBet([upcoming[0]], sportKey));
   } catch {
     return [];
   }
