@@ -12,8 +12,8 @@ import { getKalshiAdvance } from '@/lib/predictionMarkets';
 const MARKET_LABELS: Record<string, string> = {
   h2h: 'Moneyline',
   spreads: 'Spread',
-  totals: 'Total Goals',
-  draw_no_bet: 'Draw No Bet',
+  totals: 'Full Time Goals',
+  draw_no_bet: 'Win or Refund',
 };
 
 function outcomeLabel(marketKey: string, name: string, point?: number): string {

@@ -63,13 +63,18 @@ export interface GradableOutcome {
   betType: string;
 }
 
-// The Game Props browser labels the totals market "Total Goals" (see
-// odds/route.ts's MARKET_LABELS) while the AI's own picks use "Totals" —
-// normalize both to the same branch below so a manually-tapped slip leg
-// grades identically to an AI-generated pick of the same real bet type.
+// Both the Game Props browser and the AI's own picks now label markets
+// "Full Time Goals" and "Win or Refund" (renamed from "Total Goals"/"Totals"
+// and "Draw No Bet" for user clarity) — but stored history/slips already
+// generated under the old labels, including real currently-pending picks not
+// yet graded, still carry them. Alias every historical label into the same
+// stable internal grading key so a pick or leg from any era grades correctly,
+// regardless of which label was live when it was recorded.
 function normalizeBetType(betType: string): string {
   const lower = betType.toLowerCase();
-  return lower === 'total goals' ? 'totals' : lower;
+  if (lower === 'total goals' || lower === 'full time goals') return 'totals';
+  if (lower === 'draw no bet') return 'win or refund';
+  return lower;
 }
 
 // Shared grading logic for anything that resolves against a regulation-time
@@ -103,9 +108,9 @@ export function gradeOutcome(outcome: GradableOutcome, score: FinishedScore): 'w
 
   const actualWinner = margin > 0 ? 'home' : margin < 0 ? 'away' : 'tie';
 
-  if (betType === 'draw no bet') {
+  if (betType === 'win or refund') {
     // Refunds instead of losing when regulation ends level — never grade
-    // a Draw No Bet pick as a loss just because the match was a draw.
+    // a Win or Refund pick as a loss just because the match was a draw.
     if (actualWinner === 'tie') return 'push';
     if (pickLower.includes(homeLower)) return actualWinner === 'home' ? 'win' : 'loss';
     if (pickLower.includes(awayLower)) return actualWinner === 'away' ? 'win' : 'loss';
@@ -151,7 +156,7 @@ function summarize(history: StoredPick[]): TrackRecordSummary {
   };
 
   const overall = tally(graded);
-  const byMarket = ['Moneyline', 'Draw No Bet', 'To Advance', 'Spread', 'Totals']
+  const byMarket = ['Moneyline', 'Win or Refund', 'To Advance', 'Spread', 'Full Time Goals']
     .map((market) => ({ market, ...tally(graded.filter((h) => h.betType === market)) }))
     .filter((m) => m.wins + m.losses + m.pushes > 0);
 
