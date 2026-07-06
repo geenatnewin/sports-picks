@@ -230,7 +230,13 @@ async function injectKalshiBookmaker(games: OddsGame[]): Promise<OddsGame[]> {
   );
 }
 
-const SHOPPED_BOOKMAKERS = 'fanduel,draftkings,betmgm,williamhill_us,espnbet';
+// fliff/underdog/prizepicks added per user request — these are the actual
+// apps they place real bets on, alongside Kalshi (integrated separately,
+// directly, not through this list). Still only 8 total, under the 10-per-
+// "region-equivalent" threshold The Odds API prices by, so this adds zero
+// request cost (confirmed against their cost docs — [markets] x
+// [region-equivalents], and up to 10 bookmakers = 1 region-equivalent either way).
+const SHOPPED_BOOKMAKERS = 'fanduel,draftkings,betmgm,williamhill_us,espnbet,fliff,underdog,prizepicks';
 
 async function getOddsForSport(sportKey: string): Promise<OddsGame[]> {
   if (!KEY) return [];
