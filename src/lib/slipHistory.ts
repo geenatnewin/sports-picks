@@ -102,11 +102,6 @@ export async function recordSlip(input: NewSlipInput): Promise<StoredSlip> {
   return entry;
 }
 
-export async function removeSlip(id: string): Promise<void> {
-  const slips = await readSlips();
-  await writeSlips(slips.filter((s) => s.id !== id));
-}
-
 // Grades any ungraded legs whose match has since finished, then rolls each
 // slip's overall result up from its legs (loss if any leg lost, push if no
 // loss but at least one push, otherwise win — good enough for a calibration

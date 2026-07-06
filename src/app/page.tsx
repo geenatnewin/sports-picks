@@ -74,21 +74,6 @@ export default function Home() {
     [legs, fetchSlips]
   );
 
-  const removeSlip = useCallback(
-    async (id: string) => {
-      setPlacedSlips((prev) => prev.filter((s) => s.id !== id));
-      try {
-        await fetch('/api/slips', {
-          method: 'DELETE',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id }),
-        });
-      } catch {
-        await fetchSlips(); // re-sync if the delete didn't actually go through
-      }
-    },
-    [fetchSlips]
-  );
 
   const fetchPicks = useCallback(async () => {
     setLoading(true);
@@ -238,7 +223,7 @@ export default function Home() {
       </div>
 
       <ParlaySlip legs={legs} onRemove={removeLeg} onClear={clearLegs} onPlace={placeBet} />
-      <MyPicksPanel slips={placedSlips} onRemoveSlip={removeSlip} open={historyOpen} onOpenChange={setHistoryOpen} />
+      <MyPicksPanel slips={placedSlips} open={historyOpen} onOpenChange={setHistoryOpen} />
     </div>
   );
 }

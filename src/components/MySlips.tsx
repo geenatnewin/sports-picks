@@ -2,13 +2,7 @@
 
 import { PlacedSlip, formatAmerican } from '@/lib/parlay';
 
-export default function MySlips({
-  slips,
-  onRemove,
-}: {
-  slips: PlacedSlip[];
-  onRemove: (id: string) => void;
-}) {
+export default function MySlips({ slips }: { slips: PlacedSlip[] }) {
   if (slips.length === 0) {
     return (
       <div className="card-elevated rounded-lg p-6 text-center">
@@ -30,9 +24,6 @@ export default function MySlips({
                 minute: '2-digit',
               })}
             </p>
-            <button onClick={() => onRemove(slip.id)} className="text-neutral-600 hover:text-red-400 text-xs">
-              Remove
-            </button>
           </div>
           <div className="space-y-1.5 mb-3">
             {slip.legs.map((leg) => (

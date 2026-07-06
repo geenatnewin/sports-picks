@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { listSlips, recordSlip, removeSlip, NewSlipInput } from '@/lib/slipHistory';
+import { listSlips, recordSlip, NewSlipInput } from '@/lib/slipHistory';
 
 export async function GET() {
   const slips = await listSlips();
@@ -13,11 +13,4 @@ export async function POST(req: NextRequest) {
   }
   const slip = await recordSlip(body);
   return NextResponse.json({ slip });
-}
-
-export async function DELETE(req: NextRequest) {
-  const { id } = (await req.json()) as { id: string };
-  if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 });
-  await removeSlip(id);
-  return NextResponse.json({ ok: true });
 }

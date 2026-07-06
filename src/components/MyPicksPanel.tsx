@@ -5,12 +5,10 @@ import MySlips from './MySlips';
 
 export default function MyPicksPanel({
   slips,
-  onRemoveSlip,
   open,
   onOpenChange,
 }: {
   slips: PlacedSlip[];
-  onRemoveSlip: (id: string) => void;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -58,7 +56,7 @@ export default function MyPicksPanel({
           </button>
         </div>
         <div className="flex-1 overflow-y-auto p-4">
-          <MySlips slips={slips} onRemove={onRemoveSlip} />
+          <MySlips slips={slips} />
         </div>
       </div>
     </>
