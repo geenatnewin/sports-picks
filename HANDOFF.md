@@ -1,6 +1,6 @@
 # Dylan Harper's "Trust Me" Locks — Handoff
 
-**Last updated:** July 6, 2026 (end of Session 19 — real result feedback: MEX vs ENG Tie pick missed, sharpened the AI's Tie-pick guidance in response; see top of "What's left to do")
+**Last updated:** July 6, 2026 (end of Session 20 — added Joseph Buchdahl and Simon Gleave as two more advisory-board analyst lenses in the AI prompt, alongside Peabody/Bell; see top of "What's left to do")
 **Project location:** `C:\Users\Navin\Desktop\sports-picks`
 **Live site:** https://dylanharperpicks.vercel.app
 **GitHub:** https://github.com/geenatnewin/sports-picks (connected to Vercel — push to `main` auto-deploys)
@@ -188,6 +188,17 @@ src/
 - Typechecked and built clean. **Not yet verified against a real AI call** (standing cost-conscious policy — and the account has zero Odds API quota right now anyway, so a live check wouldn't even have real match data to work with).
 - Deployed and realiased as usual (alias-staleness gotcha recurred again, as expected).
 - Left unresolved / next session: same Odds API quota reset/upgrade decision as Sessions 17-18. Also worth a real spot-check of this Tie-pick fix next time a genuinely close match is live, to confirm the AI now reaches for Spread/Totals instead of Tie absent a specific draw-supporting reason.
+
+### Session 20 — July 6, 2026 (this session — two more advisory-board analysts added to the AI prompt)
+- User asked to add another sports betting analyst to the advisory board to help the AI recommend winning picks, then mid-session asked for a second one specifically covering soccer/football/World Cup, then clarified the AI should genuinely "pretend to be" these analysts using their real ideologies, not just generically reference them.
+- Real gap identified first: Peabody and Bell (the two existing advisors) are both NFL/US-sports sharps — nobody covered soccer-specific betting or World Cup tournament dynamics, despite this app being soccer/World Cup only.
+- Added **Joseph Buchdahl** (soccer-specific market-efficiency/closing-line-value analyst, Pinnacle Betting Resources contributor) and **Simon Gleave** (Gracenote/Nielsen's World Cup forecasting lead, ~1M simulations per tournament) to the advisory board — see the separate `advisory-board` project's own HANDOFF.md (Session 2) for the full ingestion details (37 and 16 real sources respectively, both via dispatched research agents following the existing Peabody/Bell wiki convention).
+- **Integrated both into this app's AI prompt** (`src/app/api/picks/route.ts`): the opening framing now explicitly names all four analysts and instructs the model to internally channel their blended philosophies as one analyst voice. Expanded "Apply three analyst-grounded reasoning checks" to five: added a market-consensus-humility check (Buchdahl — the shopped consensus price is usually close to true probability, real edge is rare, judge pick quality by value-over-consensus not recent outcomes) and a tournament-uncertainty check (Gleave — real historical knockout upsets carry ~1-in-7 to 1-in-10 underdog probability, not 1-in-100, so even a strong favorite in a knockout match is rarely a true near-lock).
+- Per the user's explicit request to have the AI "pretend to be" these analysts, their names are now used explicitly in the prompt's internal reasoning instructions — but extended the existing Kalshi/Polymarket non-disclosure rule to also cover all four analyst names, so the visible pick explanations still read as unified analysis, never "Buchdahl says..." or similar.
+- Also updated both `/ask-the-board` and `/asktheboard` global skills (description + advisor list) to include Buchdahl and Gleave — confirmed these edits took effect live in the same session (see updated [[feedback-skill-reload]] memory: only brand-new skill files need a session restart, editing an existing skill's content does not).
+- Typechecked and built clean. **Not yet verified against a real AI call** (standing cost-conscious policy, and the account still has zero Odds API quota so there's no real match data to test against anyway).
+- Deployed and realiased as usual (alias-staleness gotcha recurred again, as expected).
+- Left unresolved / next session: same Odds API quota decision as Sessions 17-19. Also worth a real spot-check of the two new checks next time real matches are live — especially the tournament-uncertainty check during an actual knockout-stage match, to confirm the AI now treats a strong favorite's confidence more conservatively than before.
 
 ## Session Log
 
