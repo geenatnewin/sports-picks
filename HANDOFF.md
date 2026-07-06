@@ -1,6 +1,6 @@
 # Dylan Harper's "Trust Me" Locks — Handoff
 
-**Last updated:** July 5, 2026 (end of Session 15, real Kalshi "To Advance" market added + Kalshi shopped as another book)
+**Last updated:** July 5, 2026 (end of Session 16, server-side slip history + sidebar History button + player props removed)
 **Project location:** `C:\Users\Navin\Desktop\sports-picks`
 **Live site:** https://dylanharperpicks.vercel.app
 **GitHub:** https://github.com/geenatnewin/sports-picks (connected to Vercel — push to `main` auto-deploys)
@@ -41,8 +41,9 @@ Branding: displayed name is **"Dylan Harper's 'Trust Me' Locks"**. The codebase/
 | football-data.org | Soccer team group-stage standings/form + last-5-match history | `FOOTBALL_DATA_API_KEY` | Feeds team records AND each team's actual last-5-result history (result, score, opponent) into the AI prompt. A shared `getMatchRecentForm()` helper feeds both the AI prompt and the visible Game Props card. |
 | Kalshi | Prediction market win probabilities, real shopped odds (Moneyline/Tie, Spread, Totals), and the real "To Advance" market for knockout matches | None (public API) | `lib/predictionMarkets.ts`. Four separate Kalshi series now in use: `KXWCGAME` (regulation-time moneyline, silent confidence signal — AI never cites Kalshi/Polymarket by name), `KXWCADVANCE` (Session 15 — settles on the real full-match outcome including extra time/penalties, only exists for knockout-stage matches), `KXWCSPREAD`/`KXWCTOTAL` (Session 15 — Kalshi's own regulation-time spread/total, converted to American odds and injected as an extra "book" in `lib/odds.ts` so `getBestLine` shops it alongside FanDuel/DraftKings/etc). |
 | Polymarket | Prediction market win probabilities | None (public API) | `gamma-api.polymarket.com/public-search`, matched by team names in event title. Same "don't cite the source" rule as Kalshi. |
-| PropLine | Player props | Same shape as The Odds API | Anytime goalscorer (top 5) + 2+ assists (top 3), sport key `soccer_fifa_world_cup`. Own event IDs, matched to existing matches by team name. Feeds the same two-pick system as a candidate outcome, not a separate feature. |
-| Anthropic | Generates the actual pick + explanation | `ANTHROPIC_API_KEY` | **Active in production.** Prompt explicitly asks for player tendencies, tactical/matchup knowledge, head-to-head history, and weighs strength-of-schedule. Also fed a running pick-accuracy calibration signal and instructed to lower confidence on line-divergence-flagged matches. |
+| Anthropic | Generates the actual pick + explanation | `ANTHROPIC_API_KEY` | **Active in production.** Prompt explicitly asks for player tendencies, tactical/matchup knowledge, head-to-head history, and weighs strength-of-schedule. Also fed a running pick-accuracy calibration signal (all AI picks) and a separate one for the user's actually-placed slips (Session 16), and instructed to lower confidence on line-divergence-flagged matches. |
+
+**PropLine (player props) removed entirely in Session 16** per direct request — `lib/propline.ts` deleted, along with its prompt wiring. `PROPLINE_API_KEY` is still set on Vercel but no longer used by any code; left in place rather than removed since it's harmless and not worth the extra step.
 
 Golf (DataGolf) was removed entirely in Session 5. MLB (its own odds/standings/prediction-market/player-prop pipeline plus a second Anthropic call) was added in Session 7 and removed entirely in Session 9 — neither is in the codebase anymore.
 
@@ -60,21 +61,22 @@ src/
     api/
       picks/route.ts       ← generatePicks(), one unstable_cache entry. MOCK_PICKS toggle, JSON sanitizer.
       odds/route.ts        ← Formats raw odds into browsable markets for the Game Props UI.
-    page.tsx                ← Homepage: left sidebar (branding + Refresh), main World Cup section + Game/Player Props tabs, right-side AI Parlay column
+      slips/route.ts        ← NEW (Session 16). GET/POST/DELETE for server-side placed-slip history.
+    page.tsx                ← Homepage: left sidebar (branding + Refresh + History), main World Cup/Game Props section, right-side AI Parlay column. Player Props tab removed Session 16 (was a placeholder only).
     globals.css              ← Theme, "3D" depth utility classes (card-elevated, chip-elevated, btn-raised, panel-elevated-*, chip-selected)
   components/
     MarketsBrowser.tsx     ← Per-match cards: odds + AI pick summary + L5 form chips + tap-to-open detail modal.
     AiParlayBox.tsx         ← NEW (Session 10). Right-side box rendering the AI's best 3-4 leg parlay, combined odds via lib/parlay.ts, "Add All to Parlay Slip" button.
     ParlaySlip.tsx         ← Bottom parlay builder bar, Place Bet flow
-    MyPicksPanel.tsx        ← Floating button + slide-out "My Picks" drawer
+    MyPicksPanel.tsx        ← Floating button + sidebar "History" button both open the same slide-out "My Picks" drawer (controlled `open`/`onOpenChange` props as of Session 16)
     MySlips.tsx             ← Renders placed slip history (used inside MyPicksPanel)
   lib/
-    odds.ts                ← Odds/scores fetching. getWorldCupOdds(). getBestLine, getLineDivergence, formatAmericanOdds.
+    odds.ts                ← Odds/scores fetching. getWorldCupOdds(). getBestLine, getLineDivergence, formatAmericanOdds. Injects Kalshi as an extra bookmaker (Session 15).
     soccer.ts              ← football-data.org client (standings + getTeamRecentForm + shared getMatchRecentForm helper)
-    predictionMarkets.ts   ← Kalshi (series KXWCGAME) + Polymarket clients.
-    propline.ts            ← PropLine client. getWorldCupPlayerProps().
-    pickHistory.ts         ← Grades finished picks against real scores, stores/aggregates win-rate in Vercel Blob for prompt calibration.
-    parlay.ts              ← Parlay odds math (American ↔ decimal, payout calc), PlacedSlip type — also reused client-side to compute the AI Parlay's combined odds.
+    predictionMarkets.ts   ← Kalshi (KXWCGAME/KXWCADVANCE/KXWCSPREAD/KXWCTOTAL) + Polymarket clients.
+    pickHistory.ts         ← Grades finished AI picks against real scores/Kalshi settlement, stores/aggregates win-rate in Vercel Blob for prompt calibration. Exports gradeOutcome() — shared grading logic reused by slipHistory.ts.
+    slipHistory.ts         ← NEW (Session 16). Tracks user-placed slips server-side (separate Vercel Blob store from pickHistory), grades them, summarizes for the AI prompt as a distinct "what the user actually bet" signal.
+    parlay.ts              ← Parlay odds math (American ↔ decimal, payout calc), PlacedSlip/ParlayLeg types — also reused client-side to compute the AI Parlay's combined odds.
     types.ts                ← Shared types. PicksResponse has `worldcup` and `parlay` (AiParlay | null).
 ```
 
@@ -104,7 +106,9 @@ src/
 - [x] Session 9's MLB removal spot-checked visually this session (`MOCK_PICKS` flipped to `true` temporarily, then reverted): sidebar shows only branding + Refresh with no leftover sport switcher, World Cup header still renders in red, no layout breakage. Couldn't get past the "Setup Required" empty state locally though — confirms the note above (line 91): local `.env.local` has `ODDS_API_KEY`/`ANTHROPIC_API_KEY` intentionally blank, and the early "no data + no key" guard in `generatePicks()` short-circuits before `MOCK_PICKS` is ever checked. A real local check of mock mode would need a real `ODDS_API_KEY` pasted in temporarily.
 - [ ] Consider adding NBA or another sport again someday — discussed a few times but not started fresh since MLB was removed. If revisited, treat it as new work rather than resurrecting the deleted MLB code.
 - [ ] Watch for a repeat of the truncated-JSON issue fixed in Session 5 (max_tokens bump) if output grows further
-- [ ] Player Props tab is still a "coming soon" placeholder — PropLine data feeds the AI prompt but was never built into a browsable tab UI
+- [x] **Resolved in Session 16**: Player Props removed entirely per direct request — no longer a "what's left" item.
+- [ ] **Session 16's server-side slip tracking not yet exercised end-to-end with a real placed bet.** Verified `GET /api/slips` round-trips against the real Blob store (empty list, no errors) and the sidebar History button opens the same drawer as the floating button, but didn't POST a real test slip to avoid writing throwaway data into the real production Blob store. Worth placing one real slip next session and confirming it shows up in History, then eventually gets graded once its match finishes.
+- [ ] **A "To Advance" leg added to the slip via the AI Parlay box's "Add All to Parlay Slip" button won't carry a Kalshi ticker** (only legs tapped directly in the Game Props browser do — see `AiParlayBox.tsx`'s `parlayLegs` construction) — such a leg will just stay ungraded forever rather than being graded wrong, which is the safe failure mode, but it's a known gap if this comes up in practice.
 
 ### Session 11 — July 5, 2026 (this session)
 - User felt the AI picks were purely model-driven and wanted real sports-betting-analyst perspective baked in, specifically citing market bias toward big-name/big teams. Recommended a 2-person "advisory board" of real analysts as the conceptual basis: Rufus Peabody (quant + sharp-money model-vs-market reasoning) and R.J. Bell of Pregame.com (public bias / "trap game" analysis of big-name teams).
@@ -144,6 +148,19 @@ src/
 - This resolved the second part of the user's request too ("check Kalshi + sportsbooks for game lines and game props, every available game, every time") without needing to touch the AI's cost-controlled 6-match cap at all — the Game Props browser was already uncapped and free (no Anthropic spend), so expanding what it shows doesn't affect token cost.
 - **Verified directly against live data before shipping**: wrote a throwaway script (`npx tsx`) calling all four new Kalshi functions against the real API for Mexico vs England — Moneyline (England +178 / Mexico +194 / Tie +213), Spread (England -1.5 +525, -2.5 +1900, mirrored for Mexico), Totals (12 Over/Under outcomes across 6 thresholds, all internally consistent), and Advance (England +104 / Mexico -108, a near-coinflip consistent with the moneyline split) — all returned sane, correctly-shaped data. Deleted the script after.
 - Typechecked and built clean. Deployed and realiased as usual (alias-staleness gotcha did not recur this time — same deployment picked up immediately). Checked `/api/odds` on the live site right after deploy to confirm the merged pipeline runs without errors, but the schedule happened to have zero matches in the active window at that moment, so the new markets' actual rendering couldn't be visually confirmed this session (see "What's left to do").
+
+### Session 16 — July 5, 2026 (this session — server-side slip history + player props removed)
+- User asked for three things in one request: (1) a "history" header they can press to view all slips placed on the site, (2) the app to actually track those placed slips as data to help sharpen future picks, (3) remove player props for now.
+- Investigated the existing "My Picks" floating ticket button (`MyPicksPanel.tsx`) and found placed slips were stored **only in browser localStorage** — the backend/AI had zero visibility into what the user actually placed, which is exactly why request #2 needed real architecture work, not just a UI tweak.
+- Asked the user where the new "History" entry point should go, given the floating button already does something similar — user chose to add a sidebar button *and* keep the floating one (two ways to reach the same drawer, not a replacement).
+- **Removed player props first** (unambiguous, simplifies the rest): deleted `src/lib/propline.ts` entirely, stripped all player-prop wiring from the AI prompt in `picks/route.ts` (candidate market list, the two anytime-goalscorer-specific reasoning rules, the `anytimeScorers`/`twoPlusAssists` template fields), and removed the "Player Props" tab from `page.tsx` — confirmed via `grep` that this tab only ever rendered a "coming soon" placeholder, so there was no real functionality to preserve. `PROPLINE_API_KEY` left alone on Vercel since it's harmless now unused.
+- **Built real server-side slip tracking**: new `src/lib/slipHistory.ts` (a second, separate Vercel Blob store from `pickHistory.ts`'s, since this tracks *placed* slips specifically, not every AI-generated pick) + new `src/app/api/slips/route.ts` (GET/POST/DELETE). `page.tsx` now fetches/writes through this API instead of `localStorage` — history is no longer lost if the browser cache clears or you switch devices.
+- Generalized `pickHistory.ts`'s private `gradePick()` into an exported `gradeOutcome()` so slip-leg grading and AI-pick grading share the exact same logic rather than risking drift — caught and fixed a real latent inconsistency along the way: the Game Props browser labels the totals market "Total Goals" while the AI's own picks say "Totals"; without normalizing these to the same branch, every manually-placed Totals leg would have silently graded as an unmatched "push" instead of a real win/loss.
+- **"To Advance" legs needed special handling again** (third time this concept has required its own path, after `pickHistory.ts` and the prompt) — a regulation-time score can't grade this market at all, and Kalshi's event may no longer be queryable by team name once the market closes. Threaded the specific Kalshi ticker through from the moment a "To Advance" outcome is fetched in `odds/route.ts`, into the tapped `ParlayLeg` (`MarketsBrowser.tsx`), into the stored slip leg — grading re-looks up that exact ticker's settlement via the existing `getKalshiMarketResult()`.
+- Added `summarizeSlips()` to feed a distinct calibration signal into the AI prompt — explicitly framed as "what the user actually chose to bet," separate from the existing all-picks track record, since those are genuinely different signals (every pick generated vs. the subset the user actually acted on).
+- Added the sidebar "History" button (with a live slip-count badge, mirroring the floating button's badge) — both now open the same drawer via a lifted `open`/`onOpenChange` state instead of `MyPicksPanel` managing it internally.
+- Typechecked and built clean throughout. Verified visually via a temporary mock-mode screenshot (reverted after): confirmed the Player Props tab is gone, the sidebar History button renders and opens the same "My Picks" drawer as the floating button, and `GET /api/slips` round-trips against the real Blob store with no errors (didn't POST a real test slip, to avoid writing throwaway data into production).
+- Deployed and realiased as usual; confirmed both `/api/odds` and the new `/api/slips` return 200 live.
 
 ## Session Log
 
