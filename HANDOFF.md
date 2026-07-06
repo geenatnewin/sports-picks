@@ -1,6 +1,6 @@
 # Dylan Harper's "Trust Me" Locks — Handoff
 
-**Last updated:** July 5-6, 2026 (end of Session 18 — added a persistent circuit breaker so failed Odds API requests can never burn quota again; verified working live against the currently-exhausted account, see top of "What's left to do")
+**Last updated:** July 6, 2026 (end of Session 19 — real result feedback: MEX vs ENG Tie pick missed, sharpened the AI's Tie-pick guidance in response; see top of "What's left to do")
 **Project location:** `C:\Users\Navin\Desktop\sports-picks`
 **Live site:** https://dylanharperpicks.vercel.app
 **GitHub:** https://github.com/geenatnewin/sports-picks (connected to Vercel — push to `main` auto-deploys)
@@ -180,6 +180,14 @@ src/
 - **Verified live against the real (still-exhausted) account**: hit `/api/odds` twice, 5 seconds apart. First call made a real request and got the expected `401 OUT_OF_USAGE_CREDITS` (`requestsRemaining: "0"`, `requestsUsed: "500"`), which tripped the breaker. Second call returned `skippedByBreaker: true` with `requestsRemaining`/`requestsUsed` both `null` — proof no real request was sent the second time. This is a real, confirmed fix, not just a code-reads-right assumption.
 - Noted for the future (not a code fix): Session 16's 60-second polling monitor against the live production endpoint was likely the single biggest contributor to burning the quota down so fast, independent of the 422 bug. Avoid setting up tight-interval pollers against a metered third-party API in future sessions — the breaker now limits the damage, but it's still better not to do it.
 - Left unresolved / next session: same as Session 17 — check the Odds API dashboard for the quota reset date, or decide whether to upgrade the plan. That part still needs the user, not code.
+
+### Session 19 — July 6, 2026 (this session — real result feedback + Tie-pick fix)
+- User reported 3 real outcomes from a placed slip: Brazil Moneyline (missed), Nor/Bra Over 2.5 goals full time (hit), Tie for Mex vs Eng (missed). The Brazil ML/Over 2.5 results were already the same event baked into Session 14's reputation-vs-form prompt change — the genuinely new data point was the Mex vs Eng Tie result, which had been pending/unknown since Session 14.
+- **Found the AI's own prompt was pushing it toward the mistake**: the existing "Ranking rules" bullet in `src/app/api/picks/route.ts` told the AI Tie was "very often the sharper, more confidently-hittable pick in a truly even match" — backwards, since a regulation draw is structurally the LEAST likely of the three moneyline outcomes in most matches, even genuinely even ones (an even matchup usually splits win probability between the two sides, e.g. ~37/26/37, rather than shifting it onto the draw).
+- Toned down that bullet and added a third analyst-grounded reasoning check (alongside the existing model-vs-market and reputation-vs-form checks) requiring a SPECIFIC reason for a draw — head-to-head draw history, a dead-rubber/nothing-to-play-for incentive, or genuinely cautious tactics on both sides — rather than "the teams look evenly matched" alone, which is now explicitly called out as insufficient justification for Tie. Written as a general rule per the established Session 8/13/14 pattern, not hardcoded to Mexico/England.
+- Typechecked and built clean. **Not yet verified against a real AI call** (standing cost-conscious policy — and the account has zero Odds API quota right now anyway, so a live check wouldn't even have real match data to work with).
+- Deployed and realiased as usual (alias-staleness gotcha recurred again, as expected).
+- Left unresolved / next session: same Odds API quota reset/upgrade decision as Sessions 17-18. Also worth a real spot-check of this Tie-pick fix next time a genuinely close match is live, to confirm the AI now reaches for Spread/Totals instead of Tie absent a specific draw-supporting reason.
 
 ## Session Log
 
