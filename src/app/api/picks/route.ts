@@ -240,6 +240,7 @@ async function generatePicks(): Promise<SportPicksResult> {
 
 Ranking rules:
 - Rank purely by how confident you genuinely are that each pick will actually hit — this is a "will it happen" ranking, not a payout ranking. Pick 1 is your single most confident outcome for this match; Pick 2 is your second most confident outcome, and it must still be a real, credible pick you'd genuinely bet on — not just "whatever's next best if nothing else is likely."
+- Pick 1 and Pick 2 MUST come from two DIFFERENT bet types (Moneyline/Tie, Spread, Full Time Goals, To Advance) — never two lines from the same market (e.g. "Over 1.5" and "Over 2.5" are both Full Time Goals and are not independent picks, since one hitting makes the other very likely too; same problem with two different Spread lines on the same team). If your single most confident read on a match happens to be a Full Time Goals line, Pick 2 must be your best idea from a genuinely different market, not a second, tighter or looser version of the same line.
 - Form your own probability judgment from the stats, prediction-market data, and football knowledge below — do NOT just mechanically pick the two shortest-odds/lowest-payout favorites on the board because they look "safe." If your analysis says the market is off on a given outcome (over- or under-pricing it), weight your own read over the raw odds. It's fine and often correct for your top picks to match the market favorites when they genuinely are the most likely outcomes — just make sure you actually did the analysis rather than defaulting to it.
 - Be wary of defaulting to an outright Moneyline winner in a genuinely close match. If the odds and prediction markets show the two sides bunched near a coinflip (no outcome clearly favored — e.g. moneyline prices for both teams are similar, or Kalshi/Polymarket cluster near 45-55%), guessing which side wins outright is a weak bet — but do NOT treat Tie as the automatic safer alternative (see the dedicated Tie-specific check below, this has burned a real pick). A Spread or Full Time Goals line is usually the sharper, more confidently-hittable way to express "this match is genuinely tight" than picking either side or the draw outright.
 
@@ -345,6 +346,7 @@ Return a JSON object with this exact structure:
 
 Rules:
 - Every match listed must get exactly 2 entries in "picks", ranked most likely to hit first — do not skip any match, and do not return more or fewer than 2.
+- The two picks' "betType" values must be different from each other — never both "Full Time Goals", never both "Spread", etc.
 - "counterpoint" must be either a real, specific sentence or the JSON value null — never an empty string or a placeholder like "No real case here."
 - Consider all matches listed above, whether they're today or several days out — do not limit yourself to only today's games.
 - Include the match date in "matchTime" (e.g. "Fri, Jul 3 · 3:00 PM ET") so it's clear which day each pick is for.
