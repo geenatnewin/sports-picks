@@ -355,7 +355,16 @@ Rules:
 
   const message = await client.messages.create({
     model: 'claude-sonnet-5',
-    max_tokens: 8000, // two picks per match, each with its own explanation + counterpoint
+    // Sonnet 5 defaults to adaptive thinking (no separate thinking budget —
+    // budget_tokens is removed on this model), and thinking tokens count
+    // against max_tokens same as the actual response. 8000 was sized back
+    // when the prompt was much shorter; the prompt has since grown a lot
+    // (4 named analysts, 5 reasoning checks, more markets), leaving adaptive
+    // thinking too little room and causing real stop_reason: max_tokens
+    // truncation before any JSON could be written. Raised to 16000, still
+    // under the ~16K non-streaming-safe ceiling (no need to switch to
+    // streaming for this).
+    max_tokens: 16000,
     messages: [{ role: 'user', content: prompt }],
   });
 
