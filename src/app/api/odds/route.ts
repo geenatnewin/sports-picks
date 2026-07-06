@@ -62,6 +62,11 @@ export async function GET() {
             label: o.team,
             odds: formatAmericanOdds(o.price),
             oddsValue: o.price,
+            // Threaded through so a manually-placed "To Advance" slip leg can
+            // be graded against Kalshi's own settlement later (see
+            // slipHistory.ts) — the event's odds may no longer be queryable
+            // by team name once the market closes, so this needs capturing now.
+            kalshiTicker: o.ticker,
           })),
         });
       }

@@ -56,15 +56,34 @@ function parsePoint(pick: string): number | null {
   return match ? parseFloat(match[1]) : null;
 }
 
-function gradePick(pick: StoredPick, score: FinishedScore): 'win' | 'loss' | 'push' {
-  const pickLower = pick.pick.toLowerCase();
-  const homeLower = pick.homeTeam.toLowerCase();
-  const awayLower = pick.awayTeam.toLowerCase();
-  const betType = pick.betType.toLowerCase();
+export interface GradableOutcome {
+  pick: string;
+  homeTeam: string;
+  awayTeam: string;
+  betType: string;
+}
+
+// The Game Props browser labels the totals market "Total Goals" (see
+// odds/route.ts's MARKET_LABELS) while the AI's own picks use "Totals" —
+// normalize both to the same branch below so a manually-tapped slip leg
+// grades identically to an AI-generated pick of the same real bet type.
+function normalizeBetType(betType: string): string {
+  const lower = betType.toLowerCase();
+  return lower === 'total goals' ? 'totals' : lower;
+}
+
+// Shared grading logic for anything that resolves against a regulation-time
+// score — reused for both AI-generated picks (pickHistory) and manually
+// placed parlay legs (slipHistory), so the two can't silently drift apart.
+export function gradeOutcome(outcome: GradableOutcome, score: FinishedScore): 'win' | 'loss' | 'push' {
+  const pickLower = outcome.pick.toLowerCase();
+  const homeLower = outcome.homeTeam.toLowerCase();
+  const awayLower = outcome.awayTeam.toLowerCase();
+  const betType = normalizeBetType(outcome.betType);
   const margin = score.homeScore - score.awayScore; // positive = home won
 
   if (betType === 'totals') {
-    const line = parsePoint(pick.pick);
+    const line = parsePoint(outcome.pick);
     if (line === null) return 'push';
     const total = score.homeScore + score.awayScore;
     const isOver = pickLower.includes('over');
@@ -74,7 +93,7 @@ function gradePick(pick: StoredPick, score: FinishedScore): 'win' | 'loss' | 'pu
   }
 
   if (betType === 'spread') {
-    const line = parsePoint(pick.pick);
+    const line = parsePoint(outcome.pick);
     const pickIsHome = pickLower.includes(homeLower);
     if (line === null) return 'push';
     const adjustedMargin = pickIsHome ? margin + line : -margin + line;
@@ -175,7 +194,7 @@ export async function gradeAndSummarize(finishedScores: FinishedScore[]): Promis
 
     const score = scoresById.get(pick.gameId);
     if (!score) continue;
-    pick.result = gradePick(pick, score);
+    pick.result = gradeOutcome(pick, score);
     pick.graded = true;
     gradedAnyNew = true;
   }

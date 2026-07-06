@@ -9,6 +9,7 @@ interface OddsOutcome {
   label: string;
   odds: string;
   oddsValue: number;
+  kalshiTicker?: string;
 }
 
 interface OddsMarket {
@@ -256,6 +257,7 @@ export default function MarketsBrowser({
                                 marketLabel: market.label,
                                 selectionLabel: outcome.label,
                                 odds: outcome.oddsValue,
+                                kalshiTicker: outcome.kalshiTicker,
                               })
                             }
                             className={`chip-elevated text-sm px-4 py-2 rounded-lg ${

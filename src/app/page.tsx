@@ -8,26 +8,31 @@ import AiParlayBox from '@/components/AiParlayBox';
 import { PicksResponse } from '@/lib/types';
 import { ParlayLeg, PlacedSlip } from '@/lib/parlay';
 
-const SLIPS_STORAGE_KEY = 'harppicks-my-slips';
-
 export default function Home() {
   const [data, setData] = useState<PicksResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string>('');
   const [legs, setLegs] = useState<ParlayLeg[]>([]);
-  const [tab, setTab] = useState<'gameProps' | 'playerProps'>('gameProps');
   const [placedSlips, setPlacedSlips] = useState<PlacedSlip[]>([]);
+  const [historyOpen, setHistoryOpen] = useState(false);
 
-  // Load saved slips from this browser once on mount
-  useEffect(() => {
+  const fetchSlips = useCallback(async () => {
     try {
-      const saved = localStorage.getItem(SLIPS_STORAGE_KEY);
-      if (saved) setPlacedSlips(JSON.parse(saved));
+      const res = await fetch('/api/slips');
+      if (!res.ok) return;
+      const json: { slips: PlacedSlip[] } = await res.json();
+      setPlacedSlips(json.slips);
     } catch {
-      // ignore corrupted storage
+      // slip history is a nice-to-have view, not core functionality
     }
   }, []);
+
+  // Slips are tracked server-side now (not localStorage) so the same history
+  // shows up everywhere and can feed the AI's calibration signal.
+  useEffect(() => {
+    fetchSlips();
+  }, [fetchSlips]);
 
   const toggleLeg = useCallback((leg: ParlayLeg) => {
     setLegs((prev) => {
@@ -51,34 +56,39 @@ export default function Home() {
   const clearLegs = useCallback(() => setLegs([]), []);
 
   const placeBet = useCallback(
-    (stake: number, combinedAmerican: number, payout: number) => {
-      setPlacedSlips((prev) => {
-        const next = [
-          {
-            id: `${Date.now()}`,
-            legs,
-            stake,
-            combinedAmerican,
-            payout,
-            placedAt: new Date().toISOString(),
-          },
-          ...prev,
-        ];
-        localStorage.setItem(SLIPS_STORAGE_KEY, JSON.stringify(next));
-        return next;
-      });
+    async (stake: number, combinedAmerican: number, payout: number) => {
+      try {
+        await fetch('/api/slips', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ legs, stake, combinedAmerican, payout }),
+        });
+        await fetchSlips();
+      } catch {
+        // placing the bet locally still clears the slip builder below even
+        // if the server record fails — losing history is better than losing
+        // the ability to start a new slip
+      }
       setLegs([]);
     },
-    [legs]
+    [legs, fetchSlips]
   );
 
-  const removeSlip = useCallback((id: string) => {
-    setPlacedSlips((prev) => {
-      const next = prev.filter((s) => s.id !== id);
-      localStorage.setItem(SLIPS_STORAGE_KEY, JSON.stringify(next));
-      return next;
-    });
-  }, []);
+  const removeSlip = useCallback(
+    async (id: string) => {
+      setPlacedSlips((prev) => prev.filter((s) => s.id !== id));
+      try {
+        await fetch('/api/slips', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id }),
+        });
+      } catch {
+        await fetchSlips(); // re-sync if the delete didn't actually go through
+      }
+    },
+    [fetchSlips]
+  );
 
   const fetchPicks = useCallback(async () => {
     setLoading(true);
@@ -130,6 +140,20 @@ export default function Home() {
             </svg>
             Refresh
           </button>
+          <button
+            onClick={() => setHistoryOpen(true)}
+            className="chip-elevated flex items-center justify-center gap-1.5 text-neutral-400 hover:text-neutral-200 text-xs uppercase tracking-wider py-2 rounded-lg transition-colors"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            History
+            {placedSlips.length > 0 && (
+              <span className="bg-white/10 text-neutral-300 text-[10px] font-bold rounded-full min-w-[18px] h-[18px] px-1 flex items-center justify-center">
+                {placedSlips.length}
+              </span>
+            )}
+          </button>
           <p className="text-neutral-700 text-[11px] text-center leading-relaxed">
             {today}
             {lastUpdated && !loading && <><br />Updated {lastUpdated}</>}
@@ -179,53 +203,26 @@ export default function Home() {
             </button>
           </div>
 
-          <div className="flex justify-center gap-2 mb-6">
-            <button
-              onClick={() => setTab('gameProps')}
-              className={`chip-elevated text-sm px-4 py-2 rounded-lg ${
-                tab === 'gameProps' ? 'chip-selected text-red-400' : 'text-neutral-300'
-              }`}
-            >
-              Game Props
-            </button>
-            <button
-              onClick={() => setTab('playerProps')}
-              className={`chip-elevated text-sm px-4 py-2 rounded-lg ${
-                tab === 'playerProps' ? 'chip-selected text-red-400' : 'text-neutral-300'
-              }`}
-            >
-              Player Props
-            </button>
+          <div>
+            <p className="text-neutral-600 text-xs uppercase tracking-widest mb-3 text-center">
+              Tap any line to add it to your parlay
+            </p>
+            {aiFailed && (
+              <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-4 text-center mb-4">
+                <p className="text-amber-400 text-sm font-medium mb-1">Odds are live, but pick generation failed</p>
+                <p className="text-neutral-500 text-xs">
+                  Check that <code className="text-amber-300">ANTHROPIC_API_KEY</code> in .env.local is a real key, not the placeholder.
+                </p>
+              </div>
+            )}
+            <MarketsBrowser
+              legs={legs}
+              onToggle={toggleLeg}
+              picks={currentPicks}
+              picksLoading={loading}
+              aiFailed={aiFailed}
+            />
           </div>
-
-          {tab === 'gameProps' && (
-            <div>
-              <p className="text-neutral-600 text-xs uppercase tracking-widest mb-3 text-center">
-                Tap any line to add it to your parlay
-              </p>
-              {aiFailed && (
-                <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-4 text-center mb-4">
-                  <p className="text-amber-400 text-sm font-medium mb-1">Odds are live, but pick generation failed</p>
-                  <p className="text-neutral-500 text-xs">
-                    Check that <code className="text-amber-300">ANTHROPIC_API_KEY</code> in .env.local is a real key, not the placeholder.
-                  </p>
-                </div>
-              )}
-              <MarketsBrowser
-                legs={legs}
-                onToggle={toggleLeg}
-                picks={currentPicks}
-                picksLoading={loading}
-                aiFailed={aiFailed}
-              />
-            </div>
-          )}
-
-          {tab === 'playerProps' && (
-            <div className="card-elevated rounded-lg p-6 text-center">
-              <p className="text-neutral-500 text-sm">Player props coming soon</p>
-            </div>
-          )}
         </section>
 
         <footer className="text-center text-neutral-700 text-xs pb-4">
@@ -241,7 +238,7 @@ export default function Home() {
       </div>
 
       <ParlaySlip legs={legs} onRemove={removeLeg} onClear={clearLegs} onPlace={placeBet} />
-      <MyPicksPanel slips={placedSlips} onRemoveSlip={removeSlip} />
+      <MyPicksPanel slips={placedSlips} onRemoveSlip={removeSlip} open={historyOpen} onOpenChange={setHistoryOpen} />
     </div>
   );
 }

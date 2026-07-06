@@ -1,17 +1,20 @@
 'use client';
 
-import { useState } from 'react';
 import { PlacedSlip } from '@/lib/parlay';
 import MySlips from './MySlips';
 
 export default function MyPicksPanel({
   slips,
   onRemoveSlip,
+  open,
+  onOpenChange,
 }: {
   slips: PlacedSlip[];
   onRemoveSlip: (id: string) => void;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const setOpen = onOpenChange;
 
   return (
     <>

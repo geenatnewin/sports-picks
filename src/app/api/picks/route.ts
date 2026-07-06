@@ -11,8 +11,8 @@ import {
 } from '@/lib/odds';
 import { getWorldCupStandings, getTeamRecentForm, summarizeRecentForm } from '@/lib/soccer';
 import { getPredictionMarkets, getKalshiAdvance } from '@/lib/predictionMarkets';
-import { getWorldCupPlayerProps } from '@/lib/propline';
 import { gradeAndSummarize, recordPicks } from '@/lib/pickHistory';
+import { gradeSlips, summarizeSlips } from '@/lib/slipHistory';
 import { AiParlay, MatchPick } from '@/lib/types';
 
 interface SportPicksResult {
@@ -151,6 +151,7 @@ async function generatePicks(): Promise<SportPicksResult> {
   // have performed. New picks from this run are recorded further below,
   // once the AI response is available.
   const { history: pickHistory, summary: trackRecord } = await gradeAndSummarize(finishedScores);
+  const slipTrackRecord = summarizeSlips(await gradeSlips(finishedScores));
 
   // Flatten group standings into one lookup table
   const standingsRows: StandingsRow[] = (wcStandings?.standings ?? []).flatMap(
@@ -227,22 +228,6 @@ async function generatePicks(): Promise<SportPicksResult> {
     })
   );
 
-  // Player props (anytime goalscorer, 2+ assists) from PropLine, matched to
-  // these matches by team names — PropLine uses its own event IDs. Fetched
-  // separately since it's a distinct provider from The Odds API, then merged
-  // onto each match so the prompt template can read it like any other field.
-  const playerPropsByMatch = await getWorldCupPlayerProps(
-    wcData.map((g) => ({ homeTeam: g.homeTeam, awayTeam: g.awayTeam }))
-  ).catch(() => new Map<string, { anytimeScorers: string | null; twoPlusAssists: string | null }>());
-
-  const wcDataWithProps = wcData.map((g) => {
-    const props = playerPropsByMatch.get(`${g.homeTeam} vs ${g.awayTeam}`);
-    return {
-      ...g,
-      anytimeScorers: props?.anytimeScorers ?? null,
-      twoPlusAssists: props?.twoPlusAssists ?? null,
-    };
-  });
 
   const hasWCData = wcData.length > 0;
 
@@ -255,19 +240,12 @@ async function generatePicks(): Promise<SportPicksResult> {
   }
 
   // Build AI prompt
-  const prompt = `You are a sharp professional sports analyst — someone with deep knowledge of both football itself (tactics, players, squad quality, injuries, motivation) and how sports betting markets actually work (how odds get set, how public perception distorts a line, how bet types settle differently from each other). You are not a stats model; you reason the way a real professional handicapper does, weighing everything a pure numbers-based system would miss. For EVERY match listed below, produce your TOP 2 picks, ranked most likely to hit first. Consider ALL available markets as candidates: Moneyline (including Tie), Draw No Bet, To Advance (only listed for knockout-stage matches), Spread, Totals, Anytime Goal Scorer, and 2+ Assists (when those player props are listed for that match) — genuinely weigh all of them, don't default to Moneyline out of habit and don't reach for a player prop just for variety either.
+  const prompt = `You are a sharp professional sports analyst — someone with deep knowledge of both football itself (tactics, players, squad quality, injuries, motivation) and how sports betting markets actually work (how odds get set, how public perception distorts a line, how bet types settle differently from each other). You are not a stats model; you reason the way a real professional handicapper does, weighing everything a pure numbers-based system would miss. For EVERY match listed below, produce your TOP 2 picks, ranked most likely to hit first. Consider ALL available markets as candidates: Moneyline (including Tie), Draw No Bet, To Advance (only listed for knockout-stage matches), Spread, and Totals — genuinely weigh all of them, don't default to Moneyline out of habit.
 
 Ranking rules:
 - Rank purely by how confident you genuinely are that each pick will actually hit — this is a "will it happen" ranking, not a payout ranking. Pick 1 is your single most confident outcome for this match; Pick 2 is your second most confident outcome, and it must still be a real, credible pick you'd genuinely bet on — not just "whatever's next best if nothing else is likely."
 - Form your own probability judgment from the stats, prediction-market data, and football knowledge below — do NOT just mechanically pick the two shortest-odds/lowest-payout favorites on the board because they look "safe." If your analysis says the market is off on a given outcome (over- or under-pricing it), weight your own read over the raw odds. It's fine and often correct for your top picks to match the market favorites when they genuinely are the most likely outcomes — just make sure you actually did the analysis rather than defaulting to it.
-- Don't fill both slots with player props — Moneyline/Tie, Spread, and Totals are real, often higher-probability markets. Only pick a player prop when it's genuinely one of your two most confident outcomes for this specific match (e.g. a team's clear #1 striker at a very short price against a weak defense), not by default.
 - Be wary of defaulting to an outright Moneyline winner in a genuinely close match. If the odds and prediction markets show the two sides bunched near a coinflip (no outcome clearly favored — e.g. moneyline prices for both teams are similar, or Kalshi/Polymarket cluster near 45-55%), guessing which side wins outright is a weak bet. Tie, or a Spread/Totals line, is very often the sharper, more confidently-hittable pick in a truly even match than betting on one side's outright win — don't rank an outright-win pick above Tie just because Moneyline is the default market people reach for first.
-
-IMPORTANT: The "Anytime goal scorer" and "2+ assists" lines below are pre-filtered to only the handful of most likely candidates per match — treat this as the realistic shortlist, not the full roster. If a match has no such lines listed, no player props are available for it — don't invent players or props that aren't shown.
-
-IMPORTANT: Anytime-goalscorer props are lower true-probability than they can feel, even for a team's best player — a genuinely elite striker in great form still typically has only around a 25-45% real chance of scoring in any single match, meaningfully under 50% more often than not. Never assign High confidence to an anytime-goalscorer pick; cap it at Medium at most, and only include one at all when the specific matchup is exceptional (a very short price, a clearly weak opposing defense, strong current scoring form) — not just because a recognizable star name is available on the board.
-
-IMPORTANT: When you do consider a player prop, reason about it the way a sharp bettor projects player props — don't just look at a player's own season totals in isolation. Think top-down: how much total scoring/creative opportunity does this TEAM generate against this specific opponent (shot volume, set-piece count, crossing frequency, how much the opponent's defensive setup concedes chances), and how much of that opportunity share genuinely belongs to this specific player (is he the clear #1 target, or does he split chances with others) — a player on a team that creates little against a defensive opponent is a weaker prop than the same player's raw season numbers suggest, even if he's the team's best scorer. Also weigh role-specific detail: is he on penalties/set pieces, does the opposing fullback/center-back matchup favor or suppress him specifically.
 
 Use everything provided below to determine the pick and your confidence level: the odds from the sportsbooks listed, Kalshi and Polymarket prediction market prices (these reflect real money betting on the actual outcome and are often sharper than sportsbook odds — weigh them heavily when estimating true win probability, especially when they disagree with the sportsbook implied probability), each team's group-stage record (record, goal difference, points), each team's actual last 5 match results (a stronger "how are they playing right now" signal than the aggregate record — weight recent form heavily, especially if it diverges from the season-long record), and your own general knowledge of these national teams. That general knowledge should actively cover, wherever relevant: overall squad quality and depth; individual player tendencies and strengths (e.g. a team's top scorer's finishing quality, a key playmaker's creativity and passing range, a goalkeeper's shot-stopping reputation, a defender prone to mistakes); each team's typical tactical strategy and style of play (possession-based vs. counter-attacking, high press vs. low block, set-piece threat, defensive solidity, how they set up against stronger vs. weaker opponents); historical head-to-head results or tournament history between these two teams if it's notable; and anything you know about current injuries or squad news. Don't limit your reasoning to just the numeric stats provided — actively factor in this tactical and player-level knowledge, not just as a passing mention.
 
@@ -293,6 +271,8 @@ IMPORTANT: Some matches include a "Line divergence" note — how widely sportsbo
 IMPORTANT: Do NOT mention, cite, or name-drop "Kalshi", "Polymarket", "prediction markets", or their specific prices anywhere in the explanation text. Use that data silently to inform your pick and confidence — the explanation should read as your own analysis, sourced from odds, stats, and football knowledge only. If you're relying on general knowledge rather than the sportsbook/stats data provided (e.g. injury news), say so plainly rather than stating it as verified fact — you do not have a live injury feed.
 ${trackRecord.promptText ? `
 IMPORTANT: Here is your own track record on past picks, graded against actual results: ${trackRecord.promptText} Use this only as a light calibration signal — if a market type has been underperforming, lean a little more conservative (e.g. High → Medium) there specifically, and vice versa if it's been hitting well. This is a small sample, so don't let it override what the actual data for a given match tells you, and never mention this track record in the explanation text.
+` : ''}${slipTrackRecord.promptText ? `
+IMPORTANT: ${slipTrackRecord.promptText} This reflects what the user actually chose to bet, which is a real, meaningful signal separate from your own overall pick accuracy above — but still just a light calibration input, not a reason to change your read of any specific match. Never mention this in the explanation text.
 ` : ''}
 
 IMPORTANT: Each pick may have a "counterpoint" field — one short sentence giving the single best, most credible real reason this specific pick might NOT hit, grounded in the actual data/knowledge above (a stat, a tactical matchup, a specific player, recent form, historical head-to-head). Play devil's advocate honestly here — this should be a genuine, real risk, not a throwaway line. If a pick is genuinely close to a lock — the gap in quality, form, or matchup is too lopsided for a real counter-case to exist — set "counterpoint" to null instead of manufacturing a weak reason. Do NOT write filler like "No real case here" — either give a real, specific reason it might not hit, or use null. Never contradict or undercut your own pick and confidence level; this is a risk-awareness note when a genuine one exists, not a second opinion.
@@ -303,7 +283,7 @@ In addition to the per-match picks above, also build ONE overall "AI Parlay" for
 
 Parlay rules:
 - Use 4 legs ONLY if you have genuine high confidence in all 4 individually. Otherwise use exactly 3. Never fewer than 3, never more than 4.
-- Each leg must be pulled from the same markets/data already provided above for these matches (Moneyline/Tie, Draw No Bet, Spread, Totals, Anytime Goal Scorer, or 2+ Assists) — don't invent a market or price that isn't in the data.
+- Each leg must be pulled from the same markets/data already provided above for these matches (Moneyline/Tie, Draw No Bet, To Advance, Spread, or Totals) — don't invent a market or price that isn't in the data.
 - Strongly prefer legs from different matches so the parlay's outcomes are genuinely independent of each other. Only include two legs from the same match if you have a specific, well-reasoned case for why they're not just paying twice for the same event, and say so explicitly in that leg's "reason".
 - Actively choose the legs — across all matches — that you would genuinely combine into one parlay today. This is not "copy your top pick from 3-4 random matches"; weigh which specific combination has the best realistic chance of ALL legs hitting together.
 - If fewer than 3 matches have usable market data, set "parlay" to the JSON value null instead of forcing a weak combination.
@@ -311,7 +291,7 @@ Parlay rules:
 
 ${hasWCData ? `
 === WORLD CUP 2026 — UPCOMING MATCHES ===
-${wcDataWithProps.map((g, i) => `
+${wcData.map((g, i) => `
 Match ${i + 1}: ${g.homeTeam} vs ${g.awayTeam}
 Kickoff (ET): ${g.kickoff}
 Moneyline: ${g.moneyline}
@@ -325,8 +305,6 @@ ${g.homeTeam} group-stage record: ${g.homeStats}
 ${g.awayTeam} group-stage record: ${g.awayStats}
 ${g.homeTeam} last 5 results: ${g.homeForm}
 ${g.awayTeam} last 5 results: ${g.awayForm}
-${g.anytimeScorers ? `Anytime goal scorer (most likely candidates): ${g.anytimeScorers}` : ''}
-${g.twoPlusAssists ? `2+ assists in the match (longshot props): ${g.twoPlusAssists}` : ''}
 ${g.lineDivergence.flagged ? `Line divergence: FLAGGED — sportsbooks disagree by ~${g.lineDivergence.maxSpreadPct} points on ${g.lineDivergence.outcome}'s implied probability` : ''}
 `).join('\n')}
 ` : 'No upcoming World Cup matches with posted odds right now.'}

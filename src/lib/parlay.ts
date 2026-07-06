@@ -4,6 +4,10 @@ export interface ParlayLeg {
   marketLabel: string;
   selectionLabel: string;
   odds: number; // American odds
+  // Only set for a "To Advance" leg — needed to grade it against Kalshi's
+  // own settlement later, since the event may no longer be queryable by
+  // team name once that market closes (see slipHistory.ts).
+  kalshiTicker?: string;
 }
 
 export interface PlacedSlip {
