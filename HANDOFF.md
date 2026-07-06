@@ -1,6 +1,6 @@
 # Dylan Harper's "Trust Me" Locks — Handoff
 
-**Last updated:** July 6, 2026 (end of Session 22 — renamed "Draw No Bet"/"Total Goals" to plainer labels, made placed slips permanent/non-removable)
+**Last updated:** July 6, 2026 (end of Session 23 — fixed AI picks failing on every real call: `max_tokens` too low for the now-much-larger prompt; verified fixed with a real live call)
 **Project location:** `C:\Users\Navin\Desktop\sports-picks`
 **Live site:** https://dylanharperpicks.vercel.app
 **GitHub:** https://github.com/geenatnewin/sports-picks (connected to Vercel — push to `main` auto-deploys)
@@ -219,6 +219,16 @@ src/
 - **Removed "Win or Refund" (Draw No Bet) entirely** — not offered on any of their 4 apps, so it was never actionable for them. Deleted the per-event fetch (`fetchDrawNoBet`/`injectDrawNoBet` in `odds.ts` — this also cuts one extra Odds API request per match) and every prompt/candidate-market reference in `picks/route.ts`. Kept the `pickHistory.ts` grading branch for backward compatibility with real, already-recorded picks under the old label.
 - **Added Fliff, Underdog, and PrizePicks to `SHOPPED_BOOKMAKERS`** (`odds.ts`) alongside the existing 5 sportsbooks (Kalshi is already integrated separately/directly) — confirmed via The Odds API's own cost docs first, since a bookmaker-list change could plausibly raise quota usage (per the new [[feedback-odds-quota-heads-up]] rule): cost scales in groups of 10 bookmakers per region-equivalent, and 5→8 stays under that threshold, so this added **zero** request cost — didn't need to ask before implementing.
 - Typechecked, built, deployed, realiased, and verified live via `/api/odds` (still returns real matches with no errors). Didn't verify per-bookmaker breakdown of which specific book won best-price on any given match — `getBestLine()` already shops silently across all bookmakers and doesn't surface which one won, same as it's always worked for the original 5 sportsbooks plus Kalshi.
+
+### Session 23 — July 6, 2026 (this session — real production bug: AI picks failing on every call)
+- User reported the AI Picks section showing a screenshot of a real error: "Odds are live, but pick generation failed. Check that ANTHROPIC_API_KEY in .env.local is a real key, not the placeholder." — a generic, hardcoded message in `page.tsx` that doesn't reflect the actual cause (worth revisiting — the real error is already available in `data.errors` and gets thrown away in favor of this fixed text).
+- Checked the real error via `/api/picks` directly: `"AI analysis failed: No JSON in AI response"`. Checked `vercel logs` for the full diagnostic: `stop_reason: max_tokens`.
+- **Root cause**: `max_tokens: 8000` on the Anthropic call in `picks/route.ts` was sized back in Session 5, when the prompt was far shorter. Sonnet 5 defaults to adaptive thinking (no separate thinking budget — `budget_tokens` is removed on this model), and thinking tokens count against `max_tokens` the same as the actual response. The prompt has since grown substantially (Session 20's four named analysts + five reasoning checks, more markets), so adaptive thinking was very likely eating the entire 8000-token budget before the model could finish writing the JSON output — every single real `/api/picks` call had been failing this way.
+- **Real hidden cost bug found along the way**: since `generatePicks()` throws on this failure, the failed result is never cached (by design — see the `unstable_cache` comment) — meaning every real page load during this whole bug had been paying full price for a failed Anthropic generation, with zero benefit from the intended 20-minute cache.
+- Fixed by raising `max_tokens` to 16000 — still under the ~16K non-streaming-safe ceiling, no need to switch to streaming.
+- Typechecked and built clean. Deployed and realiased as usual.
+- **Verified with a real live `/api/picks` call** (justified here since this was fixing an actively broken production feature, not just a routine check) — confirmed `errors: []`, real picks generated for both live matches, proper explanations, and the Session 22 "Full Time Goals" rename correctly showing up in the AI's own `betType` output too. This is a real, confirmed fix, not just a code-reads-right assumption.
+- Left unresolved / next session: the frontend's hardcoded "check ANTHROPIC_API_KEY in .env.local" error message in `page.tsx` is misleading (mentions a local-dev file, always shows the same text regardless of the real cause) — worth wiring it to show the real error from `data.errors` next time this area gets touched, though not urgent now that the underlying bug is fixed.
 
 ## Session Log
 
