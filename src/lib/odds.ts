@@ -1,3 +1,4 @@
+import { get, put, del } from '@vercel/blob';
 import { OddsGame, Bookmaker } from './types';
 import { getKalshiSpread, getKalshiTotal, getKalshiMoneyline } from './predictionMarkets';
 
@@ -17,10 +18,97 @@ interface OddsApiDiagnostic {
   requestsUsed: string | null;
   body: string | null;
   checkedAt: string;
+  skippedByBreaker?: boolean;
 }
 let lastOddsDiagnostic: OddsApiDiagnostic | null = null;
 
-async function recordOddsDiagnostic(res: Response): Promise<void> {
+export function getOddsDiagnostic(): OddsApiDiagnostic | null {
+  return lastOddsDiagnostic;
+}
+
+// Confirmed directly against Next's fetch-cache source (patch-fetch.js): it
+// only caches responses with status === 200, so `next: { revalidate }` gives
+// ZERO protection once a request starts failing — every invocation re-hits
+// the live Odds API at full frequency (a 60s poller means a real failing
+// request every 60s, not every 30 minutes). That's the actual mechanism that
+// let the draw_no_bet 422 (present since Session 13) burn the account down to
+// 0/500 quota, since failed requests still count against it. A per-instance
+// in-memory flag isn't enough either — Vercel serverless cold starts reset it
+// constantly (the same lesson Session 3 already learned the hard way for the
+// picks cache) — so this is persisted in Blob storage to actually hold across
+// invocations. After any failure, no further real requests go out until the
+// cooldown passes; every call in between reuses the recorded failure instead.
+const BREAKER_PATH = 'odds-api-breaker.json';
+const BREAKER_COOLDOWN_MS = 30 * 60 * 1000;
+
+interface BreakerState {
+  failedAt: string;
+  status: number;
+  body: string | null;
+}
+
+async function readBreaker(): Promise<BreakerState | null> {
+  if (!process.env.BLOB_READ_WRITE_TOKEN) return null;
+  try {
+    const blob = await get(BREAKER_PATH, { access: 'private' });
+    if (!blob || blob.statusCode !== 200) return null;
+    return JSON.parse(await new Response(blob.stream).text()) as BreakerState;
+  } catch {
+    return null;
+  }
+}
+
+async function tripBreaker(status: number, body: string | null): Promise<void> {
+  if (!process.env.BLOB_READ_WRITE_TOKEN) return;
+  const state: BreakerState = { failedAt: new Date().toISOString(), status, body };
+  try {
+    await put(BREAKER_PATH, JSON.stringify(state), {
+      access: 'private',
+      addRandomSuffix: false,
+      allowOverwrite: true,
+      contentType: 'application/json',
+    });
+  } catch {
+    // Breaker is a safety net, not core functionality — a failed write just
+    // means the next call re-attempts and can re-trip it, no worse than today.
+  }
+}
+
+async function clearBreaker(): Promise<void> {
+  if (!process.env.BLOB_READ_WRITE_TOKEN) return;
+  try {
+    await del(BREAKER_PATH);
+  } catch {
+    // Nothing to clean up if it was never tripped, or a transient delete
+    // failure — harmless, the stale state just expires via BREAKER_COOLDOWN_MS.
+  }
+}
+
+function breakerActive(state: BreakerState | null): boolean {
+  return state != null && Date.now() - new Date(state.failedAt).getTime() < BREAKER_COOLDOWN_MS;
+}
+
+// Every real call to The Odds API — bulk odds, scores, per-event draw_no_bet
+// — goes through here so all three share one breaker. Returns null when the
+// breaker is open (skip fetching entirely) or on a genuine failure; callers
+// treat both the same way (empty result), which they already did before this
+// existed.
+async function oddsApiFetch(url: string, revalidateSeconds: number): Promise<Response | null> {
+  const breaker = await readBreaker();
+  if (breakerActive(breaker)) {
+    lastOddsDiagnostic = {
+      ok: false,
+      status: breaker!.status,
+      requestsRemaining: null,
+      requestsUsed: null,
+      body: `[circuit breaker open since ${breaker!.failedAt}, no request sent — cooldown ${BREAKER_COOLDOWN_MS / 60000}min] last failure: ${breaker!.body ?? ''}`.slice(0, 500),
+      checkedAt: new Date().toISOString(),
+      skippedByBreaker: true,
+    };
+    return null;
+  }
+
+  const res = await fetch(url, { next: { revalidate: revalidateSeconds } });
   lastOddsDiagnostic = {
     ok: res.ok,
     status: res.status,
@@ -29,11 +117,13 @@ async function recordOddsDiagnostic(res: Response): Promise<void> {
     body: res.ok ? null : (await res.text()).slice(0, 500),
     checkedAt: new Date().toISOString(),
   };
-  if (!res.ok) console.error('[odds.ts] Odds API request failed:', lastOddsDiagnostic);
-}
-
-export function getOddsDiagnostic(): OddsApiDiagnostic | null {
-  return lastOddsDiagnostic;
+  if (!res.ok) {
+    console.error('[odds.ts] Odds API request failed:', lastOddsDiagnostic);
+    await tripBreaker(res.status, lastOddsDiagnostic.body);
+  } else {
+    await clearBreaker();
+  }
+  return res;
 }
 
 // "Today" is always anchored to US Eastern time, regardless of what
@@ -64,11 +154,8 @@ interface RawScoreEntry {
 async function getScoresSnapshot(sportKey: string): Promise<RawScoreEntry[]> {
   if (!KEY) return [];
   try {
-    const res = await fetch(
-      `${BASE}/sports/${sportKey}/scores/?apiKey=${KEY}&daysFrom=3`,
-      { next: { revalidate: 300 } }
-    );
-    if (!res.ok) return [];
+    const res = await oddsApiFetch(`${BASE}/sports/${sportKey}/scores/?apiKey=${KEY}&daysFrom=3`, 300);
+    if (!res || !res.ok) return [];
     return await res.json();
   } catch {
     return [];
@@ -156,11 +243,11 @@ const SHOPPED_BOOKMAKERS = 'fanduel,draftkings,betmgm,williamhill_us,espnbet';
 async function fetchDrawNoBet(sportKey: string, eventId: string): Promise<Bookmaker[]> {
   if (!KEY) return [];
   try {
-    const res = await fetch(
+    const res = await oddsApiFetch(
       `${BASE}/sports/${sportKey}/events/${eventId}/odds?apiKey=${KEY}&bookmakers=${SHOPPED_BOOKMAKERS}&markets=draw_no_bet&oddsFormat=american`,
-      { next: { revalidate: 1800 } }
+      1800
     );
-    if (!res.ok) return [];
+    if (!res || !res.ok) return [];
     const event = await res.json();
     return event.bookmakers ?? [];
   } catch {
@@ -194,14 +281,13 @@ async function getOddsForSport(sportKey: string): Promise<OddsGame[]> {
     // bookmakers bills as 1 "region" on The Odds API, same cost as just 2.
     // draw_no_bet is deliberately NOT requested here (see injectDrawNoBet).
     const [res, completedIds] = await Promise.all([
-      fetch(
+      oddsApiFetch(
         `${BASE}/sports/${sportKey}/odds?apiKey=${KEY}&bookmakers=${SHOPPED_BOOKMAKERS}&markets=h2h,spreads,totals&oddsFormat=american`,
-        { next: { revalidate: 1800 } }
+        1800
       ),
       getCompletedMatchIds(sportKey),
     ]);
-    await recordOddsDiagnostic(res);
-    if (!res.ok) return [];
+    if (!res || !res.ok) return [];
     const games: OddsGame[] = await res.json();
 
     const now = new Date();
