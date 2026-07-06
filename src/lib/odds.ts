@@ -4,6 +4,38 @@ import { getKalshiSpread, getKalshiTotal, getKalshiMoneyline } from './predictio
 const BASE = 'https://api.the-odds-api.com/v4';
 const KEY = process.env.ODDS_API_KEY;
 
+// The Odds API returns quota info as response headers on every call (success
+// or failure), and error responses include a JSON body explaining why. Both
+// get lost the instant `!res.ok` short-circuits to an empty array, which is
+// exactly what made a real empty-odds incident undiagnosable without logging
+// into the Odds API dashboard directly. Captured here instead so a repeat can
+// be diagnosed from `/api/odds`'s own response.
+interface OddsApiDiagnostic {
+  ok: boolean;
+  status: number;
+  requestsRemaining: string | null;
+  requestsUsed: string | null;
+  body: string | null;
+  checkedAt: string;
+}
+let lastOddsDiagnostic: OddsApiDiagnostic | null = null;
+
+async function recordOddsDiagnostic(res: Response): Promise<void> {
+  lastOddsDiagnostic = {
+    ok: res.ok,
+    status: res.status,
+    requestsRemaining: res.headers.get('x-requests-remaining'),
+    requestsUsed: res.headers.get('x-requests-used'),
+    body: res.ok ? null : (await res.text()).slice(0, 500),
+    checkedAt: new Date().toISOString(),
+  };
+  if (!res.ok) console.error('[odds.ts] Odds API request failed:', lastOddsDiagnostic);
+}
+
+export function getOddsDiagnostic(): OddsApiDiagnostic | null {
+  return lastOddsDiagnostic;
+}
+
 // "Today" is always anchored to US Eastern time, regardless of what
 // timezone the server process itself runs in (Vercel runs UTC, which can
 // already be a calendar day ahead of Eastern near the day boundary).
@@ -124,6 +156,7 @@ async function getOddsForSport(sportKey: string): Promise<OddsGame[]> {
       ),
       getCompletedMatchIds(sportKey),
     ]);
+    await recordOddsDiagnostic(res);
     if (!res.ok) return [];
     const games: OddsGame[] = await res.json();
 

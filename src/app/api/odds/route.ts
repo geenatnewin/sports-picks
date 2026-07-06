@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getWorldCupOdds, getBestLine, getLineDivergence, formatAmericanOdds, normalizeOutcomeName } from '@/lib/odds';
+import { getWorldCupOdds, getBestLine, getLineDivergence, formatAmericanOdds, normalizeOutcomeName, getOddsDiagnostic } from '@/lib/odds';
 import { getMatchRecentForm } from '@/lib/soccer';
 import { getKalshiAdvance } from '@/lib/predictionMarkets';
 
@@ -98,5 +98,11 @@ export async function GET() {
     })
   );
 
-  return NextResponse.json({ matches });
+  // Only surfaced when there's nothing to show — lets a repeat of the
+  // "empty odds, no errors anywhere" mystery be diagnosed straight from this
+  // endpoint's own response (quota/status from The Odds API's last call)
+  // instead of requiring vercel logs or the Odds API dashboard.
+  const diagnostic = matches.length === 0 ? getOddsDiagnostic() : null;
+
+  return NextResponse.json(diagnostic ? { matches, oddsApiDiagnostic: diagnostic } : { matches });
 }
