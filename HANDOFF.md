@@ -1,6 +1,6 @@
 # Dylan Harper's "Trust Me" Locks — Handoff
 
-**Last updated:** July 6, 2026 (end of Session 21 — user bought a fresh Odds API subscription, new key deployed and confirmed live with real odds flowing again; the Sessions 17-18 quota saga is finally closed)
+**Last updated:** July 6, 2026 (end of Session 22 — renamed "Draw No Bet"/"Total Goals" to plainer labels, made placed slips permanent/non-removable)
 **Project location:** `C:\Users\Navin\Desktop\sports-picks`
 **Live site:** https://dylanharperpicks.vercel.app
 **GitHub:** https://github.com/geenatnewin/sports-picks (connected to Vercel — push to `main` auto-deploys)
@@ -207,6 +207,14 @@ src/
 - **Verified live**: hit `/api/odds` directly and got real matches back (Portugal vs Spain, USA vs Belgium) with full markets including a working Draw No Bet — confirming both the Session 17-18 root-cause fix and the circuit breaker are functioning correctly against a real, funded account, not just the previously-exhausted one. This closes out the entire Sessions 16-18 saga for good.
 - **New standing rule from the user**: warn before implementing any sports-picks change that would meaningfully increase Odds API request volume (new per-match calls, shorter cache windows, more sports/markets, polling loops) — small/incidental increases don't need a heads-up, just proceed. Saved as a persistent memory ([[feedback-odds-quota-heads-up]]) since it applies to future sessions, not just this one.
 - Left unresolved / next session: nothing quota-related anymore. The two new advisor checks (Buchdahl, Gleave) still haven't been spot-checked against a real AI call — now that real odds are flowing again, this is worth doing next time it's natural (e.g. the user's next real slip), still without triggering an extra `/api/picks` call purely to test.
+
+### Session 22 — July 6, 2026 (this session — plainer market labels, permanent placed slips)
+- User asked to rename "Draw No Bet" to something clearer since they didn't know what it meant. Renamed it to **"Win or Refund"** across the board: the Game Props browser's `MARKET_LABELS` (`odds/route.ts`), every reference in the AI prompt (`picks/route.ts`, so the AI's own `betType` output now says "Win or Refund" too — same label everywhere, not just the browser), and the grading dispatch in `pickHistory.ts`.
+- User then separately asked to rename "Total Goals" to **"Full Time Goals"**, specifically to make explicit that it's 90-minute regulation-time goals only (not extra time) — same full-coverage treatment: `MARKET_LABELS`, the AI prompt (was "Totals" there, now also "Full Time Goals" for full consistency, removing the need for the old totals/"Total Goals" cross-mapping), and grading.
+- **Kept backward compatibility for grading correctness**: `pickHistory.ts`'s `normalizeBetType()` now aliases all pre-rename labels ("Draw No Bet", "Totals", "Total Goals") into the same stable internal grading keys as their new names — this matters because real, currently-pending (ungraded) picks generated under the old labels exist right now (the app has been live with real quota since Session 21), and they still need to grade correctly once their matches finish. The user-facing display labels changed; the internal grading logic didn't silently break for anything already in flight.
+- Verified live: hit `/api/odds` and confirmed the response now shows "Full Time Goals" and "Win or Refund" as market labels. Did not verify the AI's own `betType` output via a real `/api/picks` call (standing cost-conscious policy) — worth confirming next time real picks are pulled naturally.
+- **Separately, user asked to make placed slips permanent** — no more "Remove" button in the slip history view. Removed the whole capability end-to-end rather than just hiding the button, since nothing else used it: the button in `MySlips.tsx`, the `onRemoveSlip` prop threading through `MyPicksPanel.tsx` and `page.tsx`, the `DELETE /api/slips` handler, and `slipHistory.ts`'s `removeSlip()`. The in-progress (not-yet-placed) parlay slip builder's own remove-a-leg button (`ParlaySlip.tsx`) is untouched — that's normal pre-placement editing, distinct from what the user was asking about.
+- Typechecked and built clean throughout. Deployed and realiased as usual (alias-staleness gotcha recurred again).
 
 ## Session Log
 
