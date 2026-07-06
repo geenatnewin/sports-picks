@@ -1,6 +1,6 @@
 # Dylan Harper's "Trust Me" Locks — Handoff
 
-**Last updated:** July 6, 2026 (end of Session 23 — fixed AI picks failing on every real call: `max_tokens` too low for the now-much-larger prompt; verified fixed with a real live call)
+**Last updated:** July 6, 2026 (end of Session 24 — require the two picks per match to be different bet types, after a real screenshot showed Over 1.5 + Over 2.5 as "two" picks)
 **Project location:** `C:\Users\Navin\Desktop\sports-picks`
 **Live site:** https://dylanharperpicks.vercel.app
 **GitHub:** https://github.com/geenatnewin/sports-picks (connected to Vercel — push to `main` auto-deploys)
@@ -229,6 +229,13 @@ src/
 - Typechecked and built clean. Deployed and realiased as usual.
 - **Verified with a real live `/api/picks` call** (justified here since this was fixing an actively broken production feature, not just a routine check) — confirmed `errors: []`, real picks generated for both live matches, proper explanations, and the Session 22 "Full Time Goals" rename correctly showing up in the AI's own `betType` output too. This is a real, confirmed fix, not just a code-reads-right assumption.
 - Left unresolved / next session: the frontend's hardcoded "check ANTHROPIC_API_KEY in .env.local" error message in `page.tsx` is misleading (mentions a local-dev file, always shows the same text regardless of the real cause) — worth wiring it to show the real error from `data.errors` next time this area gets touched, though not urgent now that the underlying bug is fixed.
+
+### Session 24 — July 6, 2026 (this session — real bug: two picks from the same market)
+- User shared a screenshot: a match's two picks were "Over 1.5" (High) and "Over 2.5" (Medium), both `betType: "Full Time Goals"` — not two independent picks, since Over 2.5 hitting makes Over 1.5 hit too (same problem would apply to two different Spread lines on the same team).
+- Added an explicit rule in two places in `picks/route.ts`'s prompt: the Pick 1/Pick 2 "Ranking rules" section (Pick 1 and Pick 2 must come from two different bet types) and the final JSON "Rules" checklist (the two picks' `betType` values must differ) — belt-and-suspenders, since the ranking-rules section is where the reasoning happens but the final checklist is what the model checks right before emitting JSON.
+- Typechecked and built clean. Deployed and realiased as usual.
+- **Not verified against a real AI call** — this is a prompt-quality fix (the app still works, it just occasionally produced two same-category picks), not a broken feature, so shipped on typecheck/build confidence per the standing cost-conscious policy, same as the Session 19 Tie-pick fix and the Session 22 renames.
+- Left unresolved / next session: worth a real spot-check next time a live match slate is pulled, to confirm the AI now genuinely diversifies bet types across its two picks rather than just picking two different point values within Full Time Goals or Spread.
 
 ## Session Log
 
