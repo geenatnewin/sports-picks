@@ -129,8 +129,8 @@ export interface KalshiAdvanceOutcome {
 
 // The one real market this app has for "does this team actually progress
 // past this knockout tie" — settles on the true outcome including extra
-// time/penalties, unlike Moneyline/Win or Refund which both settle on
-// regulation time only. Only exists for knockout-stage matches; returns
+// time/penalties, unlike Moneyline which settles on regulation time only.
+// Only exists for knockout-stage matches; returns
 // null for group-stage games (no KXWCADVANCE event exists for them), which
 // is exactly the filtering this needs — no separate stage-detection logic required.
 export async function getKalshiAdvance(homeTeam: string, awayTeam: string): Promise<KalshiAdvanceOutcome[] | null> {

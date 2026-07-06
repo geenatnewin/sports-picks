@@ -5,15 +5,17 @@ import { getKalshiAdvance } from '@/lib/predictionMarkets';
 
 // Game lines/props only — no player props here (those live in the separate
 // Player Props tab, fed by PropLine). h2h/spreads/totals now shop Kalshi
-// alongside sportsbooks (see injectKalshiBookmaker in lib/odds.ts); draw_no_bet
-// is sportsbook-only (The Odds API already carries it). "To Advance" isn't in
-// this table since it comes from a separate Kalshi-only lookup below, not
-// the shopped-bookmakers list — it only exists for knockout-stage matches.
+// alongside sportsbooks (see injectKalshiBookmaker in lib/odds.ts). "To
+// Advance" isn't in this table since it comes from a separate Kalshi-only
+// lookup below, not the shopped-bookmakers list — it only exists for
+// knockout-stage matches. Win or Refund (formerly Draw No Bet) was removed
+// per user request — not offered on any of the apps (Kalshi, Underdog,
+// PrizePicks, Fliff) they actually place bets on, this is a picks/analysis
+// tool only, so there's no reason to surface a market they can't act on.
 const MARKET_LABELS: Record<string, string> = {
   h2h: 'Moneyline',
   spreads: 'Spread',
   totals: 'Full Time Goals',
-  draw_no_bet: 'Win or Refund',
 };
 
 function outcomeLabel(marketKey: string, name: string, point?: number): string {
