@@ -150,7 +150,7 @@ async function generatePicks(): Promise<SportPicksResult> {
   // against real final scores, so the AI can see how its own past picks
   // have performed. New picks from this run are recorded further below,
   // once the AI response is available.
-  const { history: pickHistory, summary: trackRecord } = await gradeAndSummarize(finishedScores);
+  const { summary: trackRecord } = await gradeAndSummarize(finishedScores);
   const slipTrackRecord = summarizeSlips(await gradeSlips(finishedScores));
 
   // Flatten group standings into one lookup table
@@ -417,7 +417,7 @@ Rules:
       };
     })
     .filter((p): p is NonNullable<typeof p> => p !== null);
-  await recordPicks(pickHistory, newPickInputs).catch(() => {});
+  await recordPicks(newPickInputs).catch(() => {});
 
   // Defensively validate the AI's parlay shape rather than trusting it
   // outright — a malformed parlay shouldn't take down the whole picks

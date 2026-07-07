@@ -1,4 +1,4 @@
-import { get, put } from '@vercel/blob';
+import { get, put, BlobPreconditionFailedError, BlobError } from '@vercel/blob';
 import { FinishedScore } from './odds';
 import { getKalshiMarketResult } from './predictionMarkets';
 
@@ -22,31 +22,62 @@ export interface StoredPick {
 
 const HISTORY_PATH = 'pick-history.json';
 
-async function readHistory(): Promise<StoredPick[]> {
-  if (!process.env.BLOB_READ_WRITE_TOKEN) return [];
+async function readHistoryWithEtag(): Promise<{ history: StoredPick[]; etag: string | null }> {
+  if (!process.env.BLOB_READ_WRITE_TOKEN) return { history: [], etag: null };
   try {
     const blob = await get(HISTORY_PATH, { access: 'private' });
-    if (!blob || blob.statusCode !== 200) return [];
+    if (!blob || blob.statusCode !== 200) return { history: [], etag: null };
     const text = await new Response(blob.stream).text();
-    return JSON.parse(text) as StoredPick[];
+    return { history: JSON.parse(text) as StoredPick[], etag: blob.blob.etag };
   } catch {
-    return [];
+    return { history: [], etag: null };
   }
 }
 
-async function writeHistory(history: StoredPick[]): Promise<void> {
-  if (!process.env.BLOB_READ_WRITE_TOKEN) return;
-  try {
-    await put(HISTORY_PATH, JSON.stringify(history), {
-      access: 'private',
-      addRandomSuffix: false,
-      allowOverwrite: true,
-      contentType: 'application/json',
-    });
-  } catch {
-    // Track record is a soft signal, not core functionality — swallow write
-    // failures rather than breaking pick generation over it.
+const MAX_WRITE_ATTEMPTS = 5;
+
+// The SDK is documented to throw BlobPreconditionFailedError on an ifMatch
+// conflict, but observed directly (via slipHistory.ts's concurrency test
+// against this same Blob store) it can also surface as a plain BlobError
+// with the same underlying message — check both rather than trust the
+// documented type alone. Exported so slipHistory.ts can share it.
+export function isEtagConflict(err: unknown): boolean {
+  if (err instanceof BlobPreconditionFailedError) return true;
+  return err instanceof BlobError && /conditional request|conflicting operation|precondition/i.test(err.message);
+}
+
+// Vercel Blob's put() has no true read-modify-write transaction, so two
+// requests reading this history around the same time — e.g. this run's
+// recordPicks() write racing another concurrent request's grading write —
+// can otherwise silently clobber each other, the same failure mode fixed in
+// slipHistory.ts. ifMatch turns the write into a compare-and-swap: a stale
+// write is rejected instead of overwriting, and we just re-read the latest
+// history and retry the mutation.
+async function mutateHistory(mutate: (current: StoredPick[]) => StoredPick[]): Promise<StoredPick[]> {
+  if (!process.env.BLOB_READ_WRITE_TOKEN) return mutate([]);
+
+  for (let attempt = 1; attempt <= MAX_WRITE_ATTEMPTS; attempt++) {
+    const { history: current, etag } = await readHistoryWithEtag();
+    const next = mutate(current);
+    try {
+      await put(HISTORY_PATH, JSON.stringify(next), {
+        access: 'private',
+        addRandomSuffix: false,
+        allowOverwrite: true,
+        contentType: 'application/json',
+        ...(etag ? { ifMatch: etag } : {}),
+      });
+      return next;
+    } catch (err) {
+      if (isEtagConflict(err) && attempt < MAX_WRITE_ATTEMPTS) {
+        continue; // another write landed first — re-read and retry the mutation
+      }
+      // Track record is a soft signal, not core functionality — swallow
+      // persistent write failures rather than breaking pick generation.
+      return next;
+    }
   }
+  return mutate([]);
 }
 
 // Parses the trailing line value out of a pick string like "Argentina -1.5"
@@ -168,20 +199,25 @@ function summarize(history: StoredPick[]): TrackRecordSummary {
   return { promptText: lines.join(' ') };
 }
 
-// Reads the stored pick history, grades any picks whose match has since
-// finished against real final scores, persists the update, and returns a
-// short track-record summary to feed into the AI prompt as a calibration
-// signal. New picks from the current run are recorded separately via
-// recordPicks() once the AI response is available.
+// Grades any picks whose match has since finished against real final scores,
+// persists the update, and returns a short track-record summary to feed into
+// the AI prompt as a calibration signal. New picks from the current run are
+// recorded separately via recordPicks() once the AI response is available —
+// that call happens after the (slow) AI call completes, so it always re-reads
+// fresh history itself rather than trusting a snapshot taken before the wait.
+//
+// Kalshi lookups are async, so grading decisions are computed once up front
+// against an initial read, then applied inside mutateHistory's retry loop by
+// gameId — a retry re-reads the latest history and reapplies the same
+// precomputed decisions rather than re-querying Kalshi each attempt.
 export async function gradeAndSummarize(finishedScores: FinishedScore[]): Promise<{
-  history: StoredPick[];
   summary: TrackRecordSummary;
 }> {
-  const history = await readHistory();
+  const { history: initial } = await readHistoryWithEtag();
   const scoresById = new Map(finishedScores.map((s) => [s.gameId, s]));
 
-  let gradedAnyNew = false;
-  for (const pick of history) {
+  const decisions = new Map<string, 'win' | 'loss' | 'push'>();
+  for (const pick of initial) {
     if (pick.graded) continue;
 
     // "To Advance" can't be graded from a regulation-time score — a knockout
@@ -191,51 +227,62 @@ export async function gradeAndSummarize(finishedScores: FinishedScore[]): Promis
     if (pick.betType.toLowerCase() === 'to advance' && pick.kalshiTicker) {
       const result = await getKalshiMarketResult(pick.kalshiTicker);
       if (result === null) continue; // not settled yet
-      pick.result = result === 'yes' ? 'win' : 'loss';
-      pick.graded = true;
-      gradedAnyNew = true;
+      decisions.set(pick.gameId, result === 'yes' ? 'win' : 'loss');
       continue;
     }
 
     const score = scoresById.get(pick.gameId);
     if (!score) continue;
-    pick.result = gradeOutcome(pick, score);
-    pick.graded = true;
-    gradedAnyNew = true;
+    decisions.set(pick.gameId, gradeOutcome(pick, score));
   }
 
-  // Persist newly-graded results immediately — this is a fact worth saving
-  // regardless of what the caller does next (e.g. it may bail out early on
-  // MOCK_PICKS or missing data before ever calling recordPicks()).
-  if (gradedAnyNew) await writeHistory(history);
+  const history =
+    decisions.size === 0
+      ? initial
+      : await mutateHistory((current) => {
+          for (const pick of current) {
+            if (pick.graded) continue;
+            const decided = decisions.get(pick.gameId);
+            if (decided === undefined) continue;
+            pick.result = decided;
+            pick.graded = true;
+          }
+          return current;
+        });
 
-  return { history, summary: summarize(history) };
+  return { summary: summarize(history) };
 }
 
-// Upserts this run's picks into the in-memory history (keyed by gameId, so
+// Upserts this run's picks into the stored history (keyed by gameId, so
 // re-generating a pick for a match that hasn't kicked off yet just updates
 // the stored pick rather than creating a duplicate entry) and persists it.
-export async function recordPicks(history: StoredPick[], picks: NewPickInput[]): Promise<void> {
-  const byGameId = new Map(history.map((h) => [h.gameId, h]));
+// Always re-reads fresh history itself (via mutateHistory) instead of taking
+// a history snapshot as a parameter — this is called after the AI call
+// completes, so a snapshot taken before that wait would be stale and risk
+// clobbering a grading write that landed in the meantime.
+export async function recordPicks(picks: NewPickInput[]): Promise<void> {
+  await mutateHistory((current) => {
+    const byGameId = new Map(current.map((h) => [h.gameId, h]));
 
-  for (const p of picks) {
-    const existing = byGameId.get(p.gameId);
-    if (existing?.graded) continue; // match already finished and graded — leave it alone
-    const entry: StoredPick = {
-      gameId: p.gameId,
-      event: p.event,
-      homeTeam: p.homeTeam,
-      awayTeam: p.awayTeam,
-      betType: p.betType,
-      pick: p.pick,
-      confidence: p.confidence,
-      kickoff: p.kickoff,
-      generatedAt: new Date().toISOString(),
-      graded: false,
-      kalshiTicker: p.kalshiTicker,
-    };
-    byGameId.set(p.gameId, entry);
-  }
+    for (const p of picks) {
+      const existing = byGameId.get(p.gameId);
+      if (existing?.graded) continue; // match already finished and graded — leave it alone
+      const entry: StoredPick = {
+        gameId: p.gameId,
+        event: p.event,
+        homeTeam: p.homeTeam,
+        awayTeam: p.awayTeam,
+        betType: p.betType,
+        pick: p.pick,
+        confidence: p.confidence,
+        kickoff: p.kickoff,
+        generatedAt: new Date().toISOString(),
+        graded: false,
+        kalshiTicker: p.kalshiTicker,
+      };
+      byGameId.set(p.gameId, entry);
+    }
 
-  await writeHistory(Array.from(byGameId.values()));
+    return Array.from(byGameId.values());
+  });
 }

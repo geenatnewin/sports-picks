@@ -1,6 +1,6 @@
-import { get, put, BlobPreconditionFailedError, BlobError } from '@vercel/blob';
+import { get, put } from '@vercel/blob';
 import { FinishedScore } from './odds';
-import { gradeOutcome, normalizeBetType } from './pickHistory';
+import { gradeOutcome, normalizeBetType, isEtagConflict } from './pickHistory';
 import { getKalshiMarketResult } from './predictionMarkets';
 
 // Tracks parlay slips the user has actually placed (as opposed to
@@ -51,16 +51,6 @@ async function readSlips(): Promise<StoredSlip[]> {
 }
 
 const MAX_WRITE_ATTEMPTS = 5;
-
-// The SDK is documented to throw BlobPreconditionFailedError on an ifMatch
-// conflict, but observed directly (via a standalone concurrency test against
-// this store) it can also surface as a plain BlobError with a "bad_request"
-// code carrying the same underlying message — check both rather than trust
-// the documented type alone.
-function isEtagConflict(err: unknown): boolean {
-  if (err instanceof BlobPreconditionFailedError) return true;
-  return err instanceof BlobError && /conditional request|conflicting operation|precondition/i.test(err.message);
-}
 
 // Vercel Blob's put() has no true read-modify-write transaction, so two
 // requests that read the list around the same time can otherwise silently
