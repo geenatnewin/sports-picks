@@ -1,6 +1,6 @@
 # Dylan Harper's "Trust Me" Locks — Handoff
 
-**Last updated:** July 7, 2026 (end of Session 25 — slip result UI, real bet-history analysis, fixed a slip-storage race condition)
+**Last updated:** July 7, 2026 (end of Session 26 — applied the slip-storage race fix to pickHistory.ts too)
 **Project location:** `C:\Users\Navin\Desktop\sports-picks`
 **Live site:** https://dylanharperpicks.vercel.app
 **GitHub:** https://github.com/geenatnewin/sports-picks (connected to Vercel — push to `main` auto-deploys)
@@ -110,6 +110,13 @@ src/
 - [x] **Resolved in Session 16**: Player Props removed entirely per direct request — no longer a "what's left" item.
 - [ ] **Session 16's server-side slip tracking not yet exercised end-to-end with a real placed bet.** Verified `GET /api/slips` round-trips against the real Blob store (empty list, no errors) and the sidebar History button opens the same drawer as the floating button, but didn't POST a real test slip to avoid writing throwaway data into the real production Blob store. Worth placing one real slip next session and confirming it shows up in History, then eventually gets graded once its match finishes.
 - [ ] **A "To Advance" leg added to the slip via the AI Parlay box's "Add All to Parlay Slip" button won't carry a Kalshi ticker** (only legs tapped directly in the Game Props browser do — see `AiParlayBox.tsx`'s `parlayLegs` construction) — such a leg will just stay ungraded forever rather than being graded wrong, which is the safe failure mode, but it's a known gap if this comes up in practice.
+- [x] **Resolved in Session 26**: `pickHistory.ts` had the same read-then-write race as `slipHistory.ts` (Session 25), and arguably a more exposed version of it — `recordPicks()` was writing based on a history snapshot taken *before* the AI call, so a grading write landing during that wait could get silently clobbered. Fixed by having `recordPicks()` re-read fresh via a shared `mutateHistory()` retry loop (same Blob `ifMatch` compare-and-swap pattern) instead of trusting a passed-in snapshot; `gradeAndSummarize()` now uses the same helper. `isEtagConflict()` was extracted into `pickHistory.ts` and is now imported by `slipHistory.ts` instead of being duplicated. Typechecked, built clean, deployed, realiased (alias-staleness gotcha recurred yet again — a push landed as `Building` even after the earlier ones showed `Ready`), and confirmed live via `/api/odds` (didn't hit `/api/picks` directly, per the standing preference to avoid an unnecessary paid AI call just to check).
+
+### Session 26 — July 7, 2026 (this session — pickHistory race fix)
+- Applied the exact fix from Session 25's `slipHistory.ts` race (Blob `ifMatch` compare-and-swap with retry) to `pickHistory.ts`, which had the identical unfixed pattern flagged as a known gap in Session 25's notes.
+- Went a step further than a literal port: the real bug in `pickHistory.ts` was that `recordPicks(history, picks)` took a `history` array as a parameter that was read *before* the slow AI call in `route.ts`, then used it as the base for a write *after* that call — so any grading write from a concurrent request landing during the AI call's latency window would get silently overwritten. Fixed by dropping the `history` parameter entirely; `recordPicks(picks)` now re-reads fresh via `mutateHistory()` every time it's called, regardless of how much time has passed since the caller last read.
+- `gradeAndSummarize()` was similarly rewritten on top of `mutateHistory()`, using the same "precompute async Kalshi decisions against an initial read, then apply them inside the mutate callback" structure as `slipHistory.ts`'s `gradeSlips()` — kept the two files structurally parallel since they solve the same problem.
+- Deduplicated `isEtagConflict()`: it now lives once in `pickHistory.ts` (exported) and `slipHistory.ts` imports it rather than keeping its own copy.
 
 ### Session 11 — July 5, 2026 (this session)
 - User felt the AI picks were purely model-driven and wanted real sports-betting-analyst perspective baked in, specifically citing market bias toward big-name/big teams. Recommended a 2-person "advisory board" of real analysts as the conceptual basis: Rufus Peabody (quant + sharp-money model-vs-market reasoning) and R.J. Bell of Pregame.com (public bias / "trap game" analysis of big-name teams).
