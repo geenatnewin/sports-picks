@@ -13,6 +13,8 @@ import { getWorldCupStandings, getTeamRecentForm, summarizeRecentForm } from '@/
 import { getPredictionMarkets, getKalshiAdvance } from '@/lib/predictionMarkets';
 import { gradeAndSummarize, recordPicks } from '@/lib/pickHistory';
 import { gradeSlips, summarizeSlips } from '@/lib/slipHistory';
+import { getHeadToHead, summarizeHeadToHead } from '@/lib/historicalResults';
+import { getSquadInfo, formatSquadValue } from '@/lib/squadValue';
 import { AiParlay, MatchPick } from '@/lib/types';
 
 interface SportPicksResult {
@@ -182,6 +184,12 @@ async function generatePicks(): Promise<SportPicksResult> {
       const homeForm = homeRow ? summarizeRecentForm(homeFormData, homeRow.team.id) : null;
       const awayForm = awayRow ? summarizeRecentForm(awayFormData, awayRow.team.id) : null;
 
+      const [headToHead, homeSquadInfo, awaySquadInfo] = await Promise.all([
+        getHeadToHead(game.home_team, game.away_team).catch(() => null),
+        getSquadInfo(game.home_team).catch(() => null),
+        getSquadInfo(game.away_team).catch(() => null),
+      ]);
+
       const formatMarket = (outcomes: { label: string; probability: number }[] | null) =>
         outcomes ? outcomes.map((o) => `${o.label}: ${o.probability}%`).join(' | ') : null;
 
@@ -220,6 +228,9 @@ async function generatePicks(): Promise<SportPicksResult> {
         polymarket: formatMarket(markets.polymarket),
         kalshi: formatMarket(markets.kalshi),
         lineDivergence,
+        headToHead: summarizeHeadToHead(headToHead),
+        homeSquadValue: formatSquadValue(homeSquadInfo),
+        awaySquadValue: formatSquadValue(awaySquadInfo),
       };
     })
   );
@@ -264,6 +275,8 @@ IMPORTANT: Apply five analyst-grounded reasoning checks to every pick before fin
 
 IMPORTANT: Do not treat two teams' records as equivalent just because the win/loss/goal numbers look similar — weigh the QUALITY of the opponents that produced those results, and each team's overall strength as a squad (talent level, star players, depth, typical tactical level versus the other major national teams). A loss to a top-tier team (e.g. Argentina, France, Brazil, England — elite squads by current form and player quality) is a very different signal than a loss to a weak team, even if the scoreline or record looks comparable. Use this reasoning transitively: if Team A lost a close, competitive match to a top-tier team, and Team B beat a weak team, Team A is likely still the stronger side and should usually be favored over Team B, even with a similar W-D-L record. Bake this strength-of-schedule and squad-quality judgment into both the pick and the confidence level, not just the raw stats.
 
+IMPORTANT: Some matches include a "Head-to-head" line (recent real past meetings between these exact two teams) and squad market value figures (aggregate transfer-market value of each team's current player pool, a genuine talent-depth proxy independent of this tournament's form). Use head-to-head as a distinct signal from general recent form — a lopsided head-to-head history is real information even when both teams' overall form looks similar. Use squad value the same way you'd apply the reputation-vs-current-form check above: a big gap in squad value is a real quality signal, but a big-name team with a bloated squad value and worse CURRENT tournament form than a cheaper, well-organized opponent is exactly the kind of trap that check exists to catch — don't let squad value alone override what the actual stats/form/tactics say.
+
 IMPORTANT: Refer to a tied-match outcome as "Tie", never "Draw", in both the pick and the explanation.
 
 IMPORTANT: Some matches include a "Line divergence" note — how widely sportsbooks disagree with each other on the same outcome's implied win probability. This is a soft market-uncertainty signal only, not a real fixing-detection tool (that requires account-level betting data no public odds API provides). It does NOT indicate which side is more likely to win. Never claim, imply, or speculate that a match is fixed, manipulated, or rigged. When a match is flagged, the only appropriate uses are: (1) treat it as a reason to be more conservative — e.g. drop confidence from High to Medium — and (2) optionally add one brief, neutrally-worded bullet like "sportsbooks disagree more than usual on this line" if genuinely relevant. Do not speculate about why.
@@ -304,6 +317,9 @@ ${g.homeTeam} group-stage record: ${g.homeStats}
 ${g.awayTeam} group-stage record: ${g.awayStats}
 ${g.homeTeam} last 5 results: ${g.homeForm}
 ${g.awayTeam} last 5 results: ${g.awayForm}
+${g.headToHead ? `Head-to-head, most recent meetings: ${g.headToHead}` : ''}
+${g.homeSquadValue ? `${g.homeTeam} squad market value: ${g.homeSquadValue}` : ''}
+${g.awaySquadValue ? `${g.awayTeam} squad market value: ${g.awaySquadValue}` : ''}
 ${g.lineDivergence.flagged ? `Line divergence: FLAGGED — sportsbooks disagree by ~${g.lineDivergence.maxSpreadPct} points on ${g.lineDivergence.outcome}'s implied probability` : ''}
 `).join('\n')}
 ` : 'No upcoming World Cup matches with posted odds right now.'}
