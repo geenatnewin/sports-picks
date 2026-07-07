@@ -70,7 +70,7 @@ export interface GradableOutcome {
 // yet graded, still carry them. Alias every historical label into the same
 // stable internal grading key so a pick or leg from any era grades correctly,
 // regardless of which label was live when it was recorded.
-function normalizeBetType(betType: string): string {
+export function normalizeBetType(betType: string): string {
   const lower = betType.toLowerCase();
   if (lower === 'total goals' || lower === 'full time goals') return 'totals';
   if (lower === 'draw no bet') return 'win or refund';

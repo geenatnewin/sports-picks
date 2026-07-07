@@ -1,6 +1,6 @@
 import { get, put } from '@vercel/blob';
 import { FinishedScore } from './odds';
-import { gradeOutcome } from './pickHistory';
+import { gradeOutcome, normalizeBetType } from './pickHistory';
 import { getKalshiMarketResult } from './predictionMarkets';
 
 // Tracks parlay slips the user has actually placed (as opposed to
@@ -158,6 +158,18 @@ export interface SlipTrackRecordSummary {
 
 const MIN_GRADED_SLIPS_FOR_SUMMARY = 3;
 
+// Maps pickHistory's normalized (lowercase, alias-collapsed) market keys back
+// to the current user-facing label, so a leg stored under an old market name
+// (e.g. "Total Goals" or "Draw No Bet") still buckets with its current-name
+// counterpart instead of fragmenting the breakdown across renames.
+const MARKET_LABELS: Record<string, string> = {
+  moneyline: 'Moneyline',
+  spread: 'Spread',
+  totals: 'Full Time Goals',
+  'win or refund': 'Win or Refund',
+  'to advance': 'To Advance',
+};
+
 // Summarizes the user's own actually-placed slips (not every AI pick) for
 // the prompt — a distinct signal from pickHistory's "every pick generated"
 // track record, since it reflects what the user actually chose to act on.
@@ -171,7 +183,27 @@ export function summarizeSlips(slips: StoredSlip[]): SlipTrackRecordSummary {
   const decided = wins + losses;
   const pct = decided > 0 ? Math.round((wins / decided) * 1000) / 10 : null;
 
+  const byMarket = new Map<string, { wins: number; losses: number; pushes: number }>();
+  for (const slip of graded) {
+    for (const leg of slip.legs) {
+      if (!leg.graded || !leg.result) continue;
+      const key = normalizeBetType(leg.marketLabel);
+      const tally = byMarket.get(key) ?? { wins: 0, losses: 0, pushes: 0 };
+      if (leg.result === 'win') tally.wins++;
+      else if (leg.result === 'loss') tally.losses++;
+      else tally.pushes++;
+      byMarket.set(key, tally);
+    }
+  }
+
+  const marketLines = Array.from(byMarket.entries()).map(([key, t]) => {
+    const label = MARKET_LABELS[key] ?? key;
+    const marketDecided = t.wins + t.losses;
+    const marketPct = marketDecided > 0 ? Math.round((t.wins / marketDecided) * 1000) / 10 : null;
+    return `${label}: ${t.wins}-${t.losses}${t.pushes ? `-${t.pushes}` : ''} (${marketPct ?? 'N/A'}%)`;
+  });
+
   return {
-    promptText: `The user's own actually-placed slips have gone ${wins}-${losses}${pushes ? `-${pushes}` : ''} (${pct ?? 'N/A'}%) across ${graded.length} graded slips.`,
+    promptText: `The user's own actually-placed slips have gone ${wins}-${losses}${pushes ? `-${pushes}` : ''} (${pct ?? 'N/A'}%) across ${graded.length} graded slips. By market (leg-level): ${marketLines.join(', ')}.`,
   };
 }
