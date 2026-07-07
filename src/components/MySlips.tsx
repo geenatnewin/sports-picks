@@ -16,6 +16,20 @@ const RESULT_LABELS: Record<'win' | 'loss' | 'push' | 'pending', string> = {
   pending: 'PENDING',
 };
 
+const LEG_RESULT_STYLES: Record<'win' | 'loss' | 'push' | 'pending', string> = {
+  win: 'text-green-400',
+  loss: 'text-red-400',
+  push: 'text-neutral-400',
+  pending: 'text-amber-400',
+};
+
+const LEG_RESULT_SYMBOLS: Record<'win' | 'loss' | 'push' | 'pending', string> = {
+  win: '✓',
+  loss: '✗',
+  push: '–',
+  pending: '·',
+};
+
 export default function MySlips({ slips }: { slips: PlacedSlip[] }) {
   if (slips.length === 0) {
     return (
@@ -45,17 +59,23 @@ export default function MySlips({ slips }: { slips: PlacedSlip[] }) {
             </span>
           </div>
           <div className="space-y-1.5 mb-3">
-            {slip.legs.map((leg) => (
-              <div key={leg.id} className="flex items-center justify-between text-sm gap-3">
-                <div className="min-w-0">
-                  <span className="text-white/90">{leg.selectionLabel}</span>
-                  <span className="text-neutral-600 text-xs ml-2">
-                    {leg.event} · {leg.marketLabel}
-                  </span>
+            {slip.legs.map((leg, i) => {
+              const legStatus = leg.graded && leg.result ? leg.result : 'pending';
+              return (
+                <div key={leg.id ?? `${leg.event}-${leg.marketLabel}-${i}`} className="flex items-center justify-between text-sm gap-3">
+                  <div className="min-w-0 flex items-center gap-1.5">
+                    <span className={`font-semibold ${LEG_RESULT_STYLES[legStatus]}`} title={RESULT_LABELS[legStatus]}>
+                      {LEG_RESULT_SYMBOLS[legStatus]}
+                    </span>
+                    <span className="text-white/90">{leg.selectionLabel}</span>
+                    <span className="text-neutral-600 text-xs ml-1">
+                      {leg.event} · {leg.marketLabel}
+                    </span>
+                  </div>
+                  <span className="text-red-400 font-medium whitespace-nowrap">{formatAmerican(leg.odds)}</span>
                 </div>
-                <span className="text-red-400 font-medium whitespace-nowrap">{formatAmerican(leg.odds)}</span>
-              </div>
-            ))}
+              );
+            })}
           </div>
           <div className="flex items-center justify-between text-sm pt-3 border-t border-white/[0.06]">
             <span className="text-neutral-500">

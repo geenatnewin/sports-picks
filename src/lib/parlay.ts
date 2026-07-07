@@ -8,6 +8,8 @@ export interface ParlayLeg {
   // own settlement later, since the event may no longer be queryable by
   // team name once that market closes (see slipHistory.ts).
   kalshiTicker?: string;
+  graded?: boolean;
+  result?: 'win' | 'loss' | 'push';
 }
 
 export interface PlacedSlip {
