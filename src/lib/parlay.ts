@@ -17,6 +17,8 @@ export interface PlacedSlip {
   combinedAmerican: number;
   payout: number;
   placedAt: string; // ISO timestamp
+  graded: boolean;
+  result?: 'win' | 'loss' | 'push';
 }
 
 export function americanToDecimal(odds: number): number {

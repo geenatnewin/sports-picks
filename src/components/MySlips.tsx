@@ -2,6 +2,20 @@
 
 import { PlacedSlip, formatAmerican } from '@/lib/parlay';
 
+const RESULT_STYLES: Record<'win' | 'loss' | 'push' | 'pending', string> = {
+  win: 'text-green-400 bg-green-400/10',
+  loss: 'text-red-400 bg-red-400/10',
+  push: 'text-neutral-400 bg-neutral-400/10',
+  pending: 'text-amber-400 bg-amber-400/10',
+};
+
+const RESULT_LABELS: Record<'win' | 'loss' | 'push' | 'pending', string> = {
+  win: 'WON',
+  loss: 'LOST',
+  push: 'PUSH',
+  pending: 'PENDING',
+};
+
 export default function MySlips({ slips }: { slips: PlacedSlip[] }) {
   if (slips.length === 0) {
     return (
@@ -13,7 +27,9 @@ export default function MySlips({ slips }: { slips: PlacedSlip[] }) {
 
   return (
     <div className="space-y-4">
-      {slips.map((slip) => (
+      {slips.map((slip) => {
+        const status = slip.graded && slip.result ? slip.result : 'pending';
+        return (
         <div key={slip.id} className="card-elevated rounded-lg p-4">
           <div className="flex items-center justify-between mb-3">
             <p className="text-neutral-600 text-xs">
@@ -24,6 +40,9 @@ export default function MySlips({ slips }: { slips: PlacedSlip[] }) {
                 minute: '2-digit',
               })}
             </p>
+            <span className={`text-xs font-semibold px-2 py-0.5 rounded ${RESULT_STYLES[status]}`}>
+              {RESULT_LABELS[status]}
+            </span>
           </div>
           <div className="space-y-1.5 mb-3">
             {slip.legs.map((leg) => (
@@ -45,7 +64,8 @@ export default function MySlips({ slips }: { slips: PlacedSlip[] }) {
             <span className="text-white/90 font-semibold">${slip.payout.toFixed(2)} payout</span>
           </div>
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
