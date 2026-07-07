@@ -1,6 +1,6 @@
 # Dylan Harper's "Trust Me" Locks — Handoff
 
-**Last updated:** July 6, 2026 (end of Session 24 — require the two picks per match to be different bet types, after a real screenshot showed Over 1.5 + Over 2.5 as "two" picks)
+**Last updated:** July 7, 2026 (end of Session 25 — slip result UI, real bet-history analysis, fixed a slip-storage race condition)
 **Project location:** `C:\Users\Navin\Desktop\sports-picks`
 **Live site:** https://dylanharperpicks.vercel.app
 **GitHub:** https://github.com/geenatnewin/sports-picks (connected to Vercel — push to `main` auto-deploys)
@@ -236,6 +236,15 @@ src/
 - Typechecked and built clean. Deployed and realiased as usual.
 - **Not verified against a real AI call** — this is a prompt-quality fix (the app still works, it just occasionally produced two same-category picks), not a broken feature, so shipped on typecheck/build confidence per the standing cost-conscious policy, same as the Session 19 Tie-pick fix and the Session 22 renames.
 - Left unresolved / next session: worth a real spot-check next time a live match slate is pulled, to confirm the AI now genuinely diversifies bet types across its two picks rather than just picking two different point values within Full Time Goals or Spread.
+
+### Session 25 — July 7, 2026 (this session — slip result UI, real bet-history analysis, race-condition fix)
+- Added a WON/LOST/PUSH/PENDING badge on each placed slip and a per-leg ✓/✗ hit-miss indicator in the "My Slips" history drawer (`MySlips.tsx`, `lib/parlay.ts`). Free — just surfaces grading data the backend already computes.
+- Pulled real production slip data via `/api/slips` and analyzed the 3 real graded slips from July 6 (Portugal vs Spain, USA vs Belgium): total-goals reads were correct both times, but every "who wins" leg was wrong — a Tie call on Portugal-Spain, and USA-to-win-outright backed 3 different ways (Moneyline/Spread -2.5/Draw No Bet) against Belgium, confirmed by the user to all be AI picks (recommended the night before for USA). Per the user's own judgment (consistent with declining to re-tighten Session 19's Tie logic on one more loss), **no prompt change made** — treated as one real-world match result wearing multiple costumes, not independent misses, and too small a sample to act on yet. Flagging here in case a similar overnight-favorite miss recurs.
+- **The placed-slips calibration signal (`slipHistory.ts`) already auto-feeds into every `/api/picks` call** (grades finished slips, folds an aggregate win rate into the prompt) — this was pre-existing, not new. Added a **per-market breakdown** to it (mirroring `pickHistory.ts`'s existing per-market track record), reusing `normalizeBetType` so legacy market labels (e.g. "Total Goals", "Draw No Bet") still bucket correctly with their current names. Confirmed cost: under 1% more prompt tokens, no new API calls.
+- Backfilled 2 real historical slips placed on another site (not this app) per user request, both wins: July 2 (Spain/Portugal/Switzerland moneyline, 3-leg) and July 3 (Colombia moneyline + Colombia-Ghana Under 2.5, 2-leg). Extended `recordSlip`/`NewSlipInput` to accept a pre-determined `result` per leg and an optional `placedAt` override, specifically for backfilling already-settled external bets without waiting on this app's own finished-score matching.
+- **Found and fixed a real data-loss bug while doing that backfill**: `slipHistory.ts` did a plain read-then-write with no locking — lost one of the two backfilled slips to a write race against a real slip the user placed live during this session (confirmed by direct testing: fired concurrent writes at the real endpoint and watched one silently vanish). Root-caused to Vercel Blob having no true read-modify-write transaction. Fixed by conditioning every write on the blob's ETag (`ifMatch`) with retry-on-conflict, verified against a standalone concurrency test (5 parallel writes against a disposable test blob, all 5 survived) before touching the real code. Note: the SDK's actual thrown error for a conflict didn't always match its own documented type (`BlobPreconditionFailedError`) — sometimes surfaced as a generic `BlobError` with the same message instead — so conflict detection checks both rather than trusting the documented type alone.
+- **`pickHistory.ts` has the identical read-then-write pattern and the same latent race risk** — not fixed this session (only `slipHistory.ts` was in scope), worth the same fix if it ever matters.
+- Deployed in 5 passes across the session (slip badges, per-leg indicator, per-market slip breakdown, pre-graded recordSlip support, race-condition fix); realiased and spot-checked `/api/slips` live after each. All 6 real slips confirmed intact after the final deploy.
 
 ## Session Log
 
