@@ -1,4 +1,4 @@
-import { get, put, BlobPreconditionFailedError } from '@vercel/blob';
+import { get, put, BlobPreconditionFailedError, BlobError } from '@vercel/blob';
 import { FinishedScore } from './odds';
 import { gradeOutcome, normalizeBetType } from './pickHistory';
 import { getKalshiMarketResult } from './predictionMarkets';
@@ -52,6 +52,16 @@ async function readSlips(): Promise<StoredSlip[]> {
 
 const MAX_WRITE_ATTEMPTS = 5;
 
+// The SDK is documented to throw BlobPreconditionFailedError on an ifMatch
+// conflict, but observed directly (via a standalone concurrency test against
+// this store) it can also surface as a plain BlobError with a "bad_request"
+// code carrying the same underlying message — check both rather than trust
+// the documented type alone.
+function isEtagConflict(err: unknown): boolean {
+  if (err instanceof BlobPreconditionFailedError) return true;
+  return err instanceof BlobError && /conditional request|conflicting operation|precondition/i.test(err.message);
+}
+
 // Vercel Blob's put() has no true read-modify-write transaction, so two
 // requests that read the list around the same time can otherwise silently
 // clobber each other (observed directly: a manually-backfilled slip vanished
@@ -74,7 +84,7 @@ async function mutateSlips(mutate: (current: StoredSlip[]) => StoredSlip[]): Pro
       });
       return next;
     } catch (err) {
-      if (err instanceof BlobPreconditionFailedError && attempt < MAX_WRITE_ATTEMPTS) {
+      if (isEtagConflict(err) && attempt < MAX_WRITE_ATTEMPTS) {
         continue; // another write landed first — re-read and retry the mutation
       }
       throw err;
