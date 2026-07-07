@@ -1,4 +1,4 @@
-import { get, put } from '@vercel/blob';
+import { get, put, BlobPreconditionFailedError } from '@vercel/blob';
 import { FinishedScore } from './odds';
 import { gradeOutcome, normalizeBetType } from './pickHistory';
 import { getKalshiMarketResult } from './predictionMarkets';
@@ -34,26 +34,53 @@ export interface StoredSlip {
 
 const SLIPS_PATH = 'placed-slips.json';
 
-async function readSlips(): Promise<StoredSlip[]> {
-  if (!process.env.BLOB_READ_WRITE_TOKEN) return [];
+async function readSlipsWithEtag(): Promise<{ slips: StoredSlip[]; etag: string | null }> {
+  if (!process.env.BLOB_READ_WRITE_TOKEN) return { slips: [], etag: null };
   try {
     const blob = await get(SLIPS_PATH, { access: 'private' });
-    if (!blob || blob.statusCode !== 200) return [];
+    if (!blob || blob.statusCode !== 200) return { slips: [], etag: null };
     const text = await new Response(blob.stream).text();
-    return JSON.parse(text) as StoredSlip[];
+    return { slips: JSON.parse(text) as StoredSlip[], etag: blob.blob.etag };
   } catch {
-    return [];
+    return { slips: [], etag: null };
   }
 }
 
-async function writeSlips(slips: StoredSlip[]): Promise<void> {
-  if (!process.env.BLOB_READ_WRITE_TOKEN) return;
-  await put(SLIPS_PATH, JSON.stringify(slips), {
-    access: 'private',
-    addRandomSuffix: false,
-    allowOverwrite: true,
-    contentType: 'application/json',
-  });
+async function readSlips(): Promise<StoredSlip[]> {
+  return (await readSlipsWithEtag()).slips;
+}
+
+const MAX_WRITE_ATTEMPTS = 5;
+
+// Vercel Blob's put() has no true read-modify-write transaction, so two
+// requests that read the list around the same time can otherwise silently
+// clobber each other (observed directly: a manually-backfilled slip vanished
+// when it collided with a real slip placed seconds later). ifMatch turns the
+// write into a compare-and-swap — a stale write is rejected instead of
+// overwriting, and we just re-read the latest list and retry the mutation.
+async function mutateSlips(mutate: (current: StoredSlip[]) => StoredSlip[]): Promise<StoredSlip[]> {
+  if (!process.env.BLOB_READ_WRITE_TOKEN) return mutate([]);
+
+  for (let attempt = 1; attempt <= MAX_WRITE_ATTEMPTS; attempt++) {
+    const { slips: current, etag } = await readSlipsWithEtag();
+    const next = mutate(current);
+    try {
+      await put(SLIPS_PATH, JSON.stringify(next), {
+        access: 'private',
+        addRandomSuffix: false,
+        allowOverwrite: true,
+        contentType: 'application/json',
+        ...(etag ? { ifMatch: etag } : {}),
+      });
+      return next;
+    } catch (err) {
+      if (err instanceof BlobPreconditionFailedError && attempt < MAX_WRITE_ATTEMPTS) {
+        continue; // another write landed first — re-read and retry the mutation
+      }
+      throw err;
+    }
+  }
+  throw new Error('mutateSlips: exhausted retry attempts');
 }
 
 export interface NewSlipLegInput {
@@ -84,7 +111,6 @@ export async function listSlips(): Promise<StoredSlip[]> {
 }
 
 export async function recordSlip(input: NewSlipInput): Promise<StoredSlip> {
-  const slips = await readSlips();
   const legs: StoredSlipLeg[] = input.legs.map((l) => {
     const [homeTeam, awayTeam] = l.event.split(' vs ').map((s) => s.trim());
     return {
@@ -116,7 +142,7 @@ export async function recordSlip(input: NewSlipInput): Promise<StoredSlip> {
       : undefined,
     legs,
   };
-  await writeSlips([entry, ...slips]);
+  await mutateSlips((current) => [entry, ...current]);
   return entry;
 }
 
@@ -124,50 +150,68 @@ export async function recordSlip(input: NewSlipInput): Promise<StoredSlip> {
 // slip's overall result up from its legs (loss if any leg lost, push if no
 // loss but at least one push, otherwise win — good enough for a calibration
 // signal, not a full parlay-payout recalculation).
+//
+// Kalshi lookups are async, so grading decisions are computed once up front
+// against an initial read, then applied inside mutateSlips's retry loop by
+// slip id + leg index — a retry re-reads the latest list and reapplies the
+// same precomputed decisions rather than re-querying Kalshi each attempt.
 export async function gradeSlips(finishedScores: FinishedScore[]): Promise<StoredSlip[]> {
-  const slips = await readSlips();
+  const { slips: initial } = await readSlipsWithEtag();
   const scoresByTeams = new Map(finishedScores.map((s) => [`${s.homeTeam} vs ${s.awayTeam}`, s]));
 
-  let changed = false;
-  for (const slip of slips) {
+  const decisions = new Map<string, 'win' | 'loss' | 'push'>();
+
+  for (const slip of initial) {
     if (slip.graded) continue;
 
-    for (const leg of slip.legs) {
+    for (let i = 0; i < slip.legs.length; i++) {
+      const leg = slip.legs[i];
       if (leg.graded) continue;
 
       if (leg.marketLabel.toLowerCase() === 'to advance') {
         if (!leg.kalshiTicker) continue; // no ticker captured at placement time — can't grade
         const result = await getKalshiMarketResult(leg.kalshiTicker);
         if (result === null) continue; // not settled yet
-        leg.result = result === 'yes' ? 'win' : 'loss';
-        leg.graded = true;
-        changed = true;
+        decisions.set(`${slip.id}:${i}`, result === 'yes' ? 'win' : 'loss');
         continue;
       }
 
       const score = scoresByTeams.get(leg.event);
       if (!score) continue;
-      leg.result = gradeOutcome(
+      const result = gradeOutcome(
         { pick: leg.selectionLabel, homeTeam: leg.homeTeam, awayTeam: leg.awayTeam, betType: leg.marketLabel },
         score
       );
-      leg.graded = true;
-      changed = true;
-    }
-
-    if (slip.legs.every((l) => l.graded)) {
-      slip.graded = true;
-      slip.result = slip.legs.some((l) => l.result === 'loss')
-        ? 'loss'
-        : slip.legs.some((l) => l.result === 'push')
-          ? 'push'
-          : 'win';
-      changed = true;
+      decisions.set(`${slip.id}:${i}`, result);
     }
   }
 
-  if (changed) await writeSlips(slips);
-  return slips;
+  if (decisions.size === 0) return initial;
+
+  return mutateSlips((current) => {
+    for (const slip of current) {
+      if (slip.graded) continue;
+
+      for (let i = 0; i < slip.legs.length; i++) {
+        const leg = slip.legs[i];
+        if (leg.graded) continue;
+        const decided = decisions.get(`${slip.id}:${i}`);
+        if (decided === undefined) continue;
+        leg.result = decided;
+        leg.graded = true;
+      }
+
+      if (slip.legs.every((l) => l.graded)) {
+        slip.graded = true;
+        slip.result = slip.legs.some((l) => l.result === 'loss')
+          ? 'loss'
+          : slip.legs.some((l) => l.result === 'push')
+            ? 'push'
+            : 'win';
+      }
+    }
+    return current;
+  });
 }
 
 export interface SlipTrackRecordSummary {
