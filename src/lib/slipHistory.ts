@@ -62,6 +62,11 @@ export interface NewSlipLegInput {
   selectionLabel: string;
   odds: number;
   kalshiTicker?: string;
+  // Only set when backfilling an already-settled bet placed outside this app
+  // (e.g. on another betting site) purely for the calibration signal — lets
+  // it be recorded pre-graded instead of waiting on this app's own
+  // finished-score matching, which only looks back a short window anyway.
+  result?: 'win' | 'loss' | 'push';
 }
 
 export interface NewSlipInput {
@@ -69,6 +74,9 @@ export interface NewSlipInput {
   stake: number;
   combinedAmerican: number;
   payout: number;
+  // Only set when backfilling a historical bet — overrides the default
+  // "recorded now" timestamp so the history reflects when it was actually placed.
+  placedAt?: string;
 }
 
 export async function listSlips(): Promise<StoredSlip[]> {
@@ -77,26 +85,36 @@ export async function listSlips(): Promise<StoredSlip[]> {
 
 export async function recordSlip(input: NewSlipInput): Promise<StoredSlip> {
   const slips = await readSlips();
+  const legs: StoredSlipLeg[] = input.legs.map((l) => {
+    const [homeTeam, awayTeam] = l.event.split(' vs ').map((s) => s.trim());
+    return {
+      event: l.event,
+      homeTeam: homeTeam ?? '',
+      awayTeam: awayTeam ?? '',
+      marketLabel: l.marketLabel,
+      selectionLabel: l.selectionLabel,
+      odds: l.odds,
+      kalshiTicker: l.kalshiTicker,
+      graded: !!l.result,
+      result: l.result,
+    };
+  });
+  const allGraded = legs.every((l) => l.graded);
   const entry: StoredSlip = {
     id: `${Date.now()}`,
     stake: input.stake,
     combinedAmerican: input.combinedAmerican,
     payout: input.payout,
-    placedAt: new Date().toISOString(),
-    graded: false,
-    legs: input.legs.map((l) => {
-      const [homeTeam, awayTeam] = l.event.split(' vs ').map((s) => s.trim());
-      return {
-        event: l.event,
-        homeTeam: homeTeam ?? '',
-        awayTeam: awayTeam ?? '',
-        marketLabel: l.marketLabel,
-        selectionLabel: l.selectionLabel,
-        odds: l.odds,
-        kalshiTicker: l.kalshiTicker,
-        graded: false,
-      };
-    }),
+    placedAt: input.placedAt ?? new Date().toISOString(),
+    graded: allGraded,
+    result: allGraded
+      ? legs.some((l) => l.result === 'loss')
+        ? 'loss'
+        : legs.some((l) => l.result === 'push')
+          ? 'push'
+          : 'win'
+      : undefined,
+    legs,
   };
   await writeSlips([entry, ...slips]);
   return entry;
