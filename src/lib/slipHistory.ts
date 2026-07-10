@@ -106,8 +106,14 @@ export interface NewSlipInput {
   placedAt?: string;
 }
 
+// Stored order is insertion order (mutateSlips prepends new slips), which
+// silently drifts from real chronological order the moment any slip is
+// backfilled out of sequence (see NewSlipInput.placedAt) — sort by the
+// actual placedAt date here so the History UI is always correct regardless
+// of the order slips happened to be written in.
 export async function listSlips(): Promise<StoredSlip[]> {
-  return readSlips();
+  const slips = await readSlips();
+  return slips.slice().sort((a, b) => new Date(b.placedAt).getTime() - new Date(a.placedAt).getTime());
 }
 
 export async function recordSlip(input: NewSlipInput): Promise<StoredSlip> {
