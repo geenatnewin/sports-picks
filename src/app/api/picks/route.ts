@@ -153,7 +153,11 @@ async function generatePicks(): Promise<SportPicksResult> {
   // have performed. New picks from this run are recorded further below,
   // once the AI response is available.
   const { summary: trackRecord } = await gradeAndSummarize(finishedScores);
-  const slipTrackRecord = summarizeSlips(await gradeSlips(finishedScores));
+  // gradeSlips (unlike gradeAndSummarize) rethrows on a persistent Blob ETag
+  // conflict — correct for a real slip placement via POST /api/slips, but
+  // this grading pass is just a soft calibration signal and must not be able
+  // to take down real pick generation the way recordPicks is guarded below.
+  const slipTrackRecord = summarizeSlips(await gradeSlips(finishedScores).catch(() => []));
 
   // Flatten group standings into one lookup table
   const standingsRows: StandingsRow[] = (wcStandings?.standings ?? []).flatMap(
